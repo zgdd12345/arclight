@@ -1,7 +1,16 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "files": {
-    "includes": ["**", "!**/migrations", "!**/node_modules", "!**/.arclight", "!doc"]
+    "includes": [
+      "**",
+      "!**/migrations",
+      "!**/node_modules",
+      "!**/.arclight",
+      "!doc",
+      "!**/.next",
+      "!**/next-env.d.ts",
+      "!packages/web/src/app/globals.css"
+    ]
   },
   "formatter": {
     "enabled": true,

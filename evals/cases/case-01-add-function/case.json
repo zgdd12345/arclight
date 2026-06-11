@@ -1,0 +1,12 @@
+{
+  "id": "case-01-add-function",
+  "fixture": "mini-ts",
+  "instruction": "在 src/math.ts 中加一个 multiply 函数（两个 number 参数，返回乘积）并导出。保持现有 add 函数不变。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "src/math.ts", "text": "export function multiply" },
+    { "kind": "file-contains", "path": "src/math.ts", "text": "a * b" },
+    { "kind": "file-contains", "path": "src/math.ts", "text": "export function add" },
+    { "kind": "ts-parses", "path": "src/math.ts" }
+  ]
+}

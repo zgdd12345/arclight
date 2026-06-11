@@ -2,12 +2,22 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pino } from "pino";
+import { ArtifactStore } from "./artifacts/store";
 import { loadConfig } from "./config/load";
 import { createDb } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { EventBus } from "./events/bus";
+import { makeCallProvider } from "./loop/provider-adapter";
+import { AgentRunner } from "./loop/runner";
+import { CODE_AGENT_SYSTEM_PROMPT } from "./loop/system-prompt";
+import { SandboxRouter } from "./sandbox/router";
 import { createApp } from "./server/app";
 import { removeServerJson, writeServerJson } from "./server/serverJson";
+import { applyPatchTool } from "./tools/builtin/applyPatch";
+import { bashTool } from "./tools/builtin/bash";
+import { readFileTool } from "./tools/builtin/readFile";
+import { writeFileTool } from "./tools/builtin/writeFile";
+import { makeExecuteTool, ToolRegistry } from "./tools/registry";
 
 // arclight serve --repo <path>：迁移锁 → migrate → db/bus → Hono(C1/C2) → server.json 0600
 
@@ -31,7 +41,30 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
   const { db, sqlite } = createDb(dbPath);
   const bus = new EventBus();
   const token = randomBytes(32).toString("hex");
-  const app = createApp({ repoPath: repo, arclightDir, db, bus, token });
+
+  // 真实流水线：单 provider（Anthropic，D4）+ 4 内置工具 + 沙箱路由 + spill
+  const sandbox = new SandboxRouter();
+  const sandboxProbe = await sandbox.probe();
+  log.info(sandboxProbe, "sandbox backend");
+  const registry = new ToolRegistry()
+    .register(readFileTool as never)
+    .register(writeFileTool as never)
+    .register(applyPatchTool as never)
+    .register(bashTool as never);
+  const runner = new AgentRunner({
+    db,
+    bus,
+    registry,
+    callProvider: makeCallProvider({
+      apiKey: config.anthropicApiKey,
+      model: config.model,
+      systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
+    }),
+    executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
+    approvals: { check: async () => ({ decision: "allow" }) }, // U4 换 fail-closed 状态机
+  });
+
+  const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner });
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,

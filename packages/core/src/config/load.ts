@@ -10,6 +10,7 @@ export const ConfigSchema = z.object({
   anthropicApiKey: z.string().min(1),
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(43127),
+  model: z.string().default("claude-sonnet-4-5"), // 阶段一单 provider（D4），按选型清单 claude-sonnet-4-x
 });
 export type ArclightConfig = z.infer<typeof ConfigSchema>;
 
@@ -29,6 +30,7 @@ export function loadConfig(repoPath: string): ArclightConfig {
   if (process.env.ANTHROPIC_API_KEY) env.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   if (process.env.ARCLIGHT_HOST) env.host = process.env.ARCLIGHT_HOST;
   if (process.env.ARCLIGHT_PORT) env.port = Number(process.env.ARCLIGHT_PORT);
+  if (process.env.ARCLIGHT_MODEL) env.model = process.env.ARCLIGHT_MODEL;
 
   const merged = { ...userFile, ...repoFile, ...env };
   const r = ConfigSchema.safeParse(merged);

@@ -1,3 +1,4 @@
+import { collectCapped } from "../collect";
 import profile from "../profiles/p0-local.json";
 import {
   type ProbeResult,
@@ -15,27 +16,6 @@ const DEFAULTS = {
   maxOutputBytes: profile.limits.stdoutBytes,
   image: profile.docker.image,
 };
-
-async function collectCapped(
-  stream: ReadableStream<Uint8Array>,
-  cap: number,
-  onChunk?: (chunk: string) => void,
-): Promise<{ text: string; truncated: boolean }> {
-  const decoder = new TextDecoder();
-  let text = "";
-  let truncated = false;
-  for await (const chunk of stream) {
-    const s = decoder.decode(chunk, { stream: true });
-    onChunk?.(s);
-    if (text.length < cap) {
-      text += s.slice(0, cap - text.length);
-    } else {
-      truncated = true; // 继续消费流防 backpressure 卡死，只是不再累积
-    }
-  }
-  if (text.length >= cap) truncated = true;
-  return { text, truncated };
-}
 
 export class DockerFallbackSandbox implements SandboxService {
   readonly backend = "docker-fallback" as const;

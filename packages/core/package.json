@@ -7,7 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.82",
     "@arclight/protocol": "workspace:*",
+    "ai": "^6",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.0.0",
     "node-pty": "^1.0.0",

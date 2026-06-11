@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import type { Db } from "../db/client";
 import type { EventBus } from "../events/bus";
+import type { AgentRunner } from "../loop/runner";
 import { bearerAuth } from "./middleware/auth";
 import { requestContext } from "./middleware/requestContext";
 import { createCommandsRoute } from "./routes/commands";
@@ -15,6 +17,7 @@ export type AppDeps = {
   db: Db;
   bus: EventBus;
   token: string;
+  runner?: AgentRunner; // 真实流水线（serve 注入）；缺省走 mock loop（测试）
   heartbeatMs?: number; // 测试注入
   mockDeltaMs?: number; // 测试注入
 };
@@ -23,6 +26,14 @@ export type AppDeps = {
 export function createApp(deps: AppDeps) {
   const app = new Hono();
   app.use("*", requestContext);
+  // 本地 web dev（next dev :3000）跨域直连内核（D7 无 proxy）；远程拓扑阶段二收紧
+  app.use(
+    "*",
+    cors({
+      origin: (o) => (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(o) ? o : null),
+      allowHeaders: ["authorization", "content-type"],
+    }),
+  );
   app.route("/health", healthRoute);
 
   const api = new Hono();
@@ -32,6 +43,7 @@ export function createApp(deps: AppDeps) {
     createCommandsRoute({
       db: deps.db,
       bus: deps.bus,
+      ...(deps.runner !== undefined ? { runner: deps.runner } : {}),
       ...(deps.mockDeltaMs !== undefined ? { mockDeltaMs: deps.mockDeltaMs } : {}),
     }),
   );

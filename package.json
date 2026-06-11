@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate --config=packages/core/drizzle.config.ts",
     "db:migrate": "bun packages/core/src/db/migrate.ts",
-    "smoke": "bun scripts/smoke-test-native.ts"
+    "smoke": "bun scripts/smoke-test-native.ts",
+    "eval": "bun evals/runner/run.ts",
+    "eval:mock": "ARCLIGHT_EVAL_MOCK=1 bun evals/runner/run.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

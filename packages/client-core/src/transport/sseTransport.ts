@@ -111,7 +111,7 @@ export class EventStreamManager {
 
         this.status("open");
         this.attempt = 0; // 纪律② 成功复位
-        for await (const frame of parseSseStream(res.body)) {
+        for await (const frame of parseSseStream(res.body as ReadableStream<Uint8Array>)) {
           if (this.stopped) break;
           const e = JSON.parse(frame.data) as ArcEvent;
           this.dispatch(e);

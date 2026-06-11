@@ -6,12 +6,19 @@ import type { Db } from "../../db/client";
 import { sessions, turns } from "../../db/schema";
 import type { EventBus } from "../../events/bus";
 import { runMockTurn } from "../../loop/mock-loop";
+import type { AgentRunner } from "../../loop/runner";
 
 // C1: POST /api/commands。生命周期（P0 §C）：auth → 幂等检查(session+commandId)
-// → epoch 检查(StaleEpochError) → 创建 turn → 流水线异步执行（slice1 = mock loop）。
+// → epoch 检查(StaleEpochError) → 创建 turn → 流水线异步执行。
+// 流水线选择：注入 runner = 真实 queryLoop；未注入（测试）= mock loop。
 
-export function createCommandsRoute(deps: { db: Db; bus: EventBus; mockDeltaMs?: number }) {
-  const { db, bus } = deps;
+export function createCommandsRoute(deps: {
+  db: Db;
+  bus: EventBus;
+  runner?: AgentRunner;
+  mockDeltaMs?: number;
+}) {
+  const { db, bus, runner } = deps;
 
   return new Hono().post("/", async (c) => {
     const parsed = parseArcCommand(await c.req.json().catch(() => null));
@@ -51,7 +58,10 @@ export function createCommandsRoute(deps: { db: Db; bus: EventBus; mockDeltaMs?:
             409,
           );
         }
-        // 同 session 单 active turn
+        // 同 session 单 active turn（runner 登记为权威，DB 行为兜底）
+        if (runner?.isActive(cmd.sessionId)) {
+          return c.json(ackErr(cmd.commandId, "TURN_ACTIVE", "session has an active turn"), 409);
+        }
         const active = db
           .select({ id: turns.id })
           .from(turns)
@@ -70,20 +80,24 @@ export function createCommandsRoute(deps: { db: Db; bus: EventBus; mockDeltaMs?:
           })
           .run();
         // fire-and-forget：事件经 appendEvent 落库后由 bus 推给 SSE
-        void runMockTurn(
-          { db, bus },
-          {
-            sessionId: cmd.sessionId,
-            turnId,
-            ...(deps.mockDeltaMs ? { deltaMs: deps.mockDeltaMs } : {}),
-          },
-        );
+        if (runner) {
+          void runner.startTurn({ sessionId: cmd.sessionId, turnId, userText: cmd.input.text });
+        } else {
+          void runMockTurn(
+            { db, bus },
+            {
+              sessionId: cmd.sessionId,
+              turnId,
+              ...(deps.mockDeltaMs ? { deltaMs: deps.mockDeltaMs } : {}),
+            },
+          );
+        }
         return c.json({ ok: true, commandId: cmd.commandId, turnId } satisfies ArcAck, 202);
       }
       case "interrupt": {
-        // slice2 接 AbortController；当前仅校验存在性
         const t = db.select({ id: turns.id }).from(turns).where(eq(turns.id, cmd.turnId)).get();
         if (!t) return c.json(ackErr(cmd.commandId, "TURN_NOT_FOUND", cmd.turnId), 404);
+        runner?.interrupt(cmd.turnId); // abort 透传：callProvider 流 / 工具 signal / 沙箱 kill
         return c.json({ ok: true, commandId: cmd.commandId, turnId: cmd.turnId } satisfies ArcAck);
       }
       case "approve":
