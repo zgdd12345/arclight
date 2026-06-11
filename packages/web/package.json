@@ -1,0 +1,11 @@
+{
+  "name": "@arclight/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Next.js 15 壳（slice2/Unit 3 接线：assistant-ui ExternalStoreRuntime + ArcTransport，跑 Node runtime 非 Bun）。设计规范见仓库根 DESIGN.md。",
+  "dependencies": {
+    "@arclight/client-core": "workspace:*",
+    "@arclight/protocol": "workspace:*"
+  }
+}

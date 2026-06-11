@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "name": "p0-local",
+  "fs": {
+    "default": "deny",
+    "workspace": "rw",
+    "deny": ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gh", ".git", "**/secrets/**"]
+  },
+  "net": {
+    "default": "deny",
+    "proxyAllowlist": []
+  },
+  "limits": {
+    "wallclockSec": 120,
+    "cpuSec": 60,
+    "maxPids": 128,
+    "stdoutBytes": 524288
+  },
+  "credentials": {
+    "inject": [],
+    "denyRawEnv": true
+  },
+  "docker": {
+    "image": "alpine:3.20"
+  }
+}

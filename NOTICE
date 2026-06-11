@@ -1,0 +1,22 @@
+arclight — NOTICE
+
+本文件记录第三方代码归因（Apache-2.0 等许可证义务）与重大选型修订决策。
+
+== 选型修订决策记录 ==
+
+D1/D2（2026-06-11，对抗式评审吸收，详见 doc/DEV_PLAN.md §7.2）：
+前端 Runtime 由源文档原定的 AISDKRuntime（@assistant-ui/react-ai-sdk + useChat resume）
+正式修订为 @assistant-ui/react 的 ExternalStoreRuntime；前端零 `ai` 运行时依赖，
+SSE 续接由自研 EventStreamManager（fetch + ReadableStream）实现。
+`@assistant-ui/react-ai-sdk` 已从依赖清单移除。
+
+== 第三方代码归因 ==
+
+以下项目的代码/算法在本仓库中被借用或移植（仅 MIT/Apache-2.0 来源；闭源项目仅学习设计不复制）：
+
+- pi (MIT) — agent-loop 双层循环 + 钩子面结构参考（packages/core/src/loop/，控制反转重写为 generator）
+- aider (Apache-2.0) — repomap pagerank 权重算法、SEARCH/REPLACE editblock 解析阶梯（TS 重写，slice4/5 落地时补具体文件清单）
+- cline (Apache-2.0) — CheckpointTracker shadow-git 机制（剥离 VSCode 依赖移植，slice4 落地时补清单）
+- opencode (MIT) — compaction 摘要模板、apply-patch 解析器（slice5/2 落地时补清单）
+
+实际复制/移植代码落地时，须在本文件补充：来源文件路径、目标文件路径、修改说明。

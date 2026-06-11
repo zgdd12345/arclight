@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": ["packages/*/src/**/*.ts", "packages/core/drizzle.config.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "**/migrations/**"]
+}

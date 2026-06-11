@@ -1,0 +1,26 @@
+{
+  "name": "arclight",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:core": "bun --hot packages/core/src/serve.ts --repo .",
+    "test": "vitest run",
+    "test:core": "bun test packages/core",
+    "check": "biome check .",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate --config=packages/core/drizzle.config.ts",
+    "db:migrate": "bun packages/core/src/db/migrate.ts",
+    "smoke": "bun scripts/smoke-test-native.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/bun": "^1.2.0",
+    "drizzle-kit": "^0.31.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

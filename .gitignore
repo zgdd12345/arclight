@@ -220,3 +220,14 @@ __marimo__/
 # macOS
 .DS_Store
 .gstack/
+
+# ─── Node / Bun (arclight monorepo) ───
+node_modules/
+bun.lock?
+*.tsbuildinfo
+.next/
+out/
+coverage/
+
+# arclight 运行时目录（profiles/skills 可版本化的例外在 .arclight 内单独管理）
+.arclight/
