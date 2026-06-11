@@ -87,9 +87,10 @@ function tryDotDotDots(
   const dotsRe = /^\s*\.\.\.\s*$/m;
   if (!dotsRe.test(search) && !dotsRe.test(replace)) return { matched: false };
 
+  // 捕获组使分隔符进入结果数组 → filter i%2===0 取非分隔段（String.split 忽略 g 标志）
   const splitRe = /(^\s*\.\.\.\s*\n)/m;
-  const searchPieces = search.split(new RegExp(splitRe, "gm")).filter((_, i) => i % 2 === 0);
-  const replacePieces = replace.split(new RegExp(splitRe, "gm")).filter((_, i) => i % 2 === 0);
+  const searchPieces = search.split(splitRe).filter((_, i) => i % 2 === 0);
+  const replacePieces = replace.split(splitRe).filter((_, i) => i % 2 === 0);
   if (searchPieces.length !== replacePieces.length) {
     return { matched: true, ok: false, reason: "unpaired ... in SEARCH vs REPLACE" };
   }
@@ -159,10 +160,6 @@ function ensureEol(s: string): string {
 }
 
 function splitKeepEol(s: string): string[] {
-  if (s === "") return [];
-  const lines = s.split("\n");
-  const last = lines.pop() ?? "";
-  const out = lines.map((l) => `${l}\n`);
-  if (last !== "") out.push(last);
-  return out;
+  // 行尾换行保留在各行末尾：lookbehind 在每个 \n 后切分（"a\nb\n"→["a\n","b\n"]，"abc"→["abc"]）
+  return s === "" ? [] : s.split(/(?<=\n)/);
 }

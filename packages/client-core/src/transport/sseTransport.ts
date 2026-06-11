@@ -51,7 +51,7 @@ export class EventStreamManager {
     this.stopped = true;
     this.abort?.abort();
     this.flushNow();
-    this.opts.onStatus?.("closed");
+    this.status("closed");
   }
 
   // ── 内部 ──
@@ -99,7 +99,12 @@ export class EventStreamManager {
           `/api/sessions/${this.opts.sessionId}/events` +
           `?afterSeq=${this.maxSeq}&epoch=${this.epochTracker.epoch}`;
         this.abort = new AbortController();
-        const res = await this.fetchWithAbort(path, this.abort.signal);
+        // HttpClient.getRaw 不带 signal；这里用其 url/headers 组可中断 fetch
+        const { http } = this.opts;
+        const res = await fetch(http.url(path), {
+          headers: http.headers(),
+          signal: this.abort.signal,
+        });
 
         if (res.status === 409) {
           const body = (await res.json()) as { reason: string; snapshotUrl: string };
@@ -126,12 +131,6 @@ export class EventStreamManager {
       await sleep(this.backoffDelay());
       this.attempt = Math.min(this.attempt + 1, 10);
     }
-  }
-
-  private async fetchWithAbort(path: string, signal: AbortSignal): Promise<Response> {
-    const { http } = this.opts;
-    // HttpClient.getRaw 不带 signal；这里直接用其 url/headers 组 fetch 以便可中断
-    return fetch(http.url(path), { headers: http.headers(), signal });
   }
 
   private async resync(reason: string, snapshotUrl: string): Promise<void> {

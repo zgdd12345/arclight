@@ -1,4 +1,4 @@
-import type { Tool, ToolErrorEnvelope } from "@arclight/protocol";
+import { makeToolError, type Tool, type ToolErrorEnvelope } from "@arclight/protocol";
 import { type ArtifactStore, PREVIEW_BYTES, SPILL_THRESHOLD_BYTES } from "../artifacts/store";
 import type {
   ExecutedToolResult,
@@ -58,13 +58,7 @@ export function makeExecuteTool(deps: {
       retry: boolean,
     ): ExecutedToolResult["output"] => ({
       ok: false,
-      envelope: {
-        status: "error",
-        tool: tool.meta.name,
-        error_class: cls,
-        user_message: msg,
-        retry_allowed: retry,
-      },
+      envelope: makeToolError(tool.meta.name, cls, msg, retry),
     });
 
     // zod 校验：失败走 envelope 回灌（VALIDATION 不 throw）

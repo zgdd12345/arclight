@@ -107,9 +107,7 @@ export function createCommandsRoute(deps: {
           return c.json(ackErr(cmd.commandId, "ASK_NOT_FOUND", "approvals unavailable"), 404);
         const status = approvals.decide(cmd.askId, cmd.decision);
         // 决议落地（allowed/denied）或已终态（expired/cancelled）均回 ok；挂起的 loop 轮询感知
-        return c.json({ ok: true, commandId: cmd.commandId, status } as ArcAck & {
-          status: string;
-        });
+        return c.json({ ok: true, commandId: cmd.commandId, status } satisfies ArcAck);
       }
       case "declareCap":
       case "resume":

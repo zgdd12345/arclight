@@ -59,18 +59,22 @@ export class AgentRunner {
     return this.active.has(sessionId);
   }
 
+  /** session → 其 workspace 的 id + repoPath（单点维护 join，getCheckpoint/startTurn 共用） */
+  private resolveWorkspace(sessionId: string): { id: string; repoPath: string } | undefined {
+    return this.deps.db
+      .select({ id: workspaces.id, repoPath: workspaces.repoPath })
+      .from(workspaces)
+      .innerJoin(sessions, eq(sessions.workspaceId, workspaces.id))
+      .where(eq(sessions.id, sessionId))
+      .get();
+  }
+
   /** 惰性构造 session 的检查点追踪器（需 arclightDir 启用） */
   private getCheckpoint(sessionId: string, cwd: string): SessionCheckpoint | null {
     if (!this.deps.arclightDir) return null;
     const cached = this.checkpoints.get(sessionId);
     if (cached) return cached;
-    const ws = this.deps.db
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .innerJoin(sessions, eq(sessions.workspaceId, workspaces.id))
-      .where(eq(sessions.id, sessionId))
-      .get();
-    const workspaceId = ws?.id ?? "local";
+    const workspaceId = this.resolveWorkspace(sessionId)?.id ?? "local";
     const tracker = new CheckpointTracker(
       this.deps.db,
       this.deps.arclightDir,
@@ -108,13 +112,7 @@ export class AgentRunner {
     const ac = new AbortController();
     this.active.set(sessionId, { turnId, ac });
 
-    const ws = db
-      .select({ repoPath: workspaces.repoPath })
-      .from(workspaces)
-      .innerJoin(sessions, eq(sessions.workspaceId, workspaces.id))
-      .where(eq(sessions.id, sessionId))
-      .get();
-    const cwd = ws?.repoPath ?? process.cwd();
+    const cwd = this.resolveWorkspace(sessionId)?.repoPath ?? process.cwd();
     const emit = (draft: Parameters<typeof appendEvent>[1]) => appendEvent({ db, bus }, draft);
 
     // /undo /redo：拦截特殊指令，不进 provider 循环（DEV_PLAN §2.3 ③）

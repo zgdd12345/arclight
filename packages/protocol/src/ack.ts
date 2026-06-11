@@ -8,6 +8,7 @@ export const ArcAckSchema = z.discriminatedUnion("ok", [
     commandId: z.string(),
     turnId: z.string().optional(),
     sessionId: z.string().optional(),
+    status: z.string().optional(), // approve 应答带审批终态（allowed/denied/expired/cancelled）
   }),
   z.object({
     ok: z.literal(false),

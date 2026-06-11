@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { usage } from "../db/schema";
 
@@ -49,24 +50,26 @@ export class UsageTracker {
       .run();
   }
 
-  /** session 累计（成本可观测展示用） */
+  /** session 累计（成本可观测展示用）。SQL 聚合，与 routes/sessions.ts 的 /usage 端点对称——
+   *  不全表加载（usage 行随时间无限增长）。 */
   sessionTotals(sessionId: string): {
     inputTokens: number;
     outputTokens: number;
     costUsdMicros: number;
   } {
-    const rows = this.db
-      .select()
+    const r = this.db
+      .select({
+        inputTokens: sql<number>`coalesce(sum(${usage.inputTokens}), 0)`,
+        outputTokens: sql<number>`coalesce(sum(${usage.outputTokens}), 0)`,
+        costUsdMicros: sql<number>`coalesce(sum(${usage.costUsdMicros}), 0)`,
+      })
       .from(usage)
-      .all()
-      .filter((r) => r.sessionId === sessionId);
-    return rows.reduce(
-      (acc, r) => ({
-        inputTokens: acc.inputTokens + r.inputTokens,
-        outputTokens: acc.outputTokens + r.outputTokens,
-        costUsdMicros: acc.costUsdMicros + r.costUsdMicros,
-      }),
-      { inputTokens: 0, outputTokens: 0, costUsdMicros: 0 },
-    );
+      .where(eq(usage.sessionId, sessionId))
+      .get();
+    return {
+      inputTokens: r?.inputTokens ?? 0,
+      outputTokens: r?.outputTokens ?? 0,
+      costUsdMicros: r?.costUsdMicros ?? 0,
+    };
   }
 }

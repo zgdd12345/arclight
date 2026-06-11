@@ -5,8 +5,21 @@ import type { Db } from "../db/client";
 import { approvals, toolCalls, turns } from "../db/schema";
 import type { EventBus } from "../events/bus";
 import type { ApprovalDecision, ApprovalSeam, LoopToolContext } from "../loop/types";
+import { previewJson } from "../util/text";
 import { classify } from "./presets";
 import { ApprovalService } from "./service";
+
+export type AuditKind = "blacklist.hit" | "approval.asked" | "tool.denied";
+export type AuditFn = (
+  kind: AuditKind,
+  detail: Record<string, unknown>,
+  sessionId?: string,
+) => void;
+
+/** unknown → 安全的 Record（非对象回退空对象），detail/args 落库前统一过 */
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
 
 // ApprovalSeam 完整实现（替换 slice2 的 allow-all）。fail-closed：
 // - 黑名单/admin_only → deny（不弹审批）
@@ -32,11 +45,7 @@ export class ApprovalPolicy implements ApprovalSeam {
       now?: () => number;
       pollMs?: number;
       dangerFullAccess?: boolean;
-      audit?: (
-        kind: "blacklist.hit" | "approval.asked" | "tool.denied",
-        detail: Record<string, unknown>,
-        sessionId?: string,
-      ) => void;
+      audit?: AuditFn;
     } = {},
   ) {
     this.service = new ApprovalService(db, opts.ttlMs, opts.now);
@@ -46,13 +55,7 @@ export class ApprovalPolicy implements ApprovalSeam {
   }
   private readonly pollMs: number;
   private readonly dangerFullAccess: boolean;
-  private readonly audit:
-    | ((
-        kind: "blacklist.hit" | "approval.asked" | "tool.denied",
-        detail: Record<string, unknown>,
-        sessionId?: string,
-      ) => void)
-    | undefined;
+  private readonly audit: AuditFn | undefined;
 
   /** interrupt 路径：把该 turn 下所有 pending 审批转 cancelled。
    *  注：waitForDecision 也会在 signal.aborted 时自行 cancel；此方法保证即便无活跃挂起者，
@@ -100,7 +103,7 @@ export class ApprovalPolicy implements ApprovalSeam {
       risk: decision.risk,
       cls: decision.cls,
       action: decision.action,
-      detail: typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {},
+      detail: asRecord(args),
     });
     this.db
       .update(toolCalls)
@@ -123,7 +126,7 @@ export class ApprovalPolicy implements ApprovalSeam {
       risk: decision.risk,
       cls: decision.cls,
       action: decision.action,
-      detail: typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {},
+      detail: asRecord(args),
       expiresAt: ask.expiresAt,
     });
 
@@ -153,25 +156,21 @@ export class ApprovalPolicy implements ApprovalSeam {
 
   private sleepOrAbort(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
-      const t = setTimeout(resolve, ms);
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(t);
-          resolve();
-        },
-        { once: true },
-      );
+      // 定时器先到（正常轮询路径）也要摘掉监听器，否则每轮泄漏一个直到 signal abort
+      const onAbort = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      const t = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
     });
   }
 
   private ensureToolCallRow(name: string, args: unknown, ctx: LoopToolContext): void {
-    const existing = this.db
-      .select({ id: toolCalls.id })
-      .from(toolCalls)
-      .where(eq(toolCalls.id, ctx.callId))
-      .get();
-    if (existing) return;
+    // 单语句 upsert（消除多余 SELECT round-trip）；行已存在则不动
     this.db
       .insert(toolCalls)
       .values({
@@ -180,9 +179,10 @@ export class ApprovalPolicy implements ApprovalSeam {
         turnId: ctx.turnId,
         name,
         status: "awaiting_approval",
-        args: typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {},
-        argsPreview: JSON.stringify(args).slice(0, 200),
+        args: asRecord(args),
+        argsPreview: previewJson(args),
       })
+      .onConflictDoNothing()
       .run();
   }
 

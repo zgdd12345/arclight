@@ -48,6 +48,16 @@ export const ToolErrorEnvelopeSchema = z
   .strict(); // 5 键收口：多余键（如 stack/traceback）一律拒绝
 export type ToolErrorEnvelope = z.infer<typeof ToolErrorEnvelopeSchema>;
 
+/** 5 键错误信封工厂——唯一构造点，避免各处手写对象字面量（loop / registry / policy 共用） */
+export function makeToolError(
+  tool: string,
+  error_class: ToolErrorClass,
+  user_message: string,
+  retry_allowed: boolean,
+): ToolErrorEnvelope {
+  return { status: "error", tool, error_class, user_message, retry_allowed };
+}
+
 // ── 工具执行上下文与接口（运行时类型，不进 zod）──
 export type ToolContext = {
   tenantId: string;

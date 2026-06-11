@@ -1,4 +1,5 @@
-import type { ArcEvent, Tool, ToolErrorEnvelope } from "@arclight/protocol";
+import { type ArcEvent, makeToolError, type Tool } from "@arclight/protocol";
+import { previewJson } from "../util/text";
 import type {
   ExecutedToolResult,
   LlmMessage,
@@ -11,7 +12,8 @@ import type {
 
 // queryLoop（DEV_PLAN §2.1）：agent 心脏。借 pi agent-loop 的双层循环结构，
 // 执行模型从 callback/emit 翻面为 async-generator yield（控制反转重写）。
-// 不变式：emit（=appendEvent 包装）落库与 yield 同处——yield 顺序 = 持久顺序 = SSE replay 顺序；
+// 不变式：emit（=appendEvent 包装）落库与 yield 同处。排序权威是事务内分配的 seq（= 持久顺序
+//   = SSE replay 顺序）；tool.progress 走旁路 emit（不经 yield）但同样取 seq，故全局回放顺序一致。
 // 工具执行 0% 交 AI SDK（schemas 不带 execute）；messages append-only；失败一律 5 键 envelope 回灌。
 // slice2 范围：happy-path + 中断 + 错误恢复 + 审批接缝（完整状态机=U4；压缩/钩子面=U6）。
 
@@ -82,7 +84,7 @@ export async function* queryLoop(
       yield emit({
         ...base,
         t: "session.error",
-        error: envelope(
+        error: makeToolError(
           "provider",
           "INTERNAL",
           res.errorMessage ?? "provider error",
@@ -118,7 +120,7 @@ export async function* queryLoop(
         t: "tool.requested",
         callId: call.callId,
         name: call.name,
-        argsPreview: preview(call.rawArgs),
+        argsPreview: previewJson(call.rawArgs),
         riskTier: tool?.meta.riskTier ?? "admin_only", // 未知工具按最高风险
         riskClass: tool?.meta.riskClass ?? "irreversible",
       });
@@ -164,7 +166,7 @@ export async function* queryLoop(
       yield emit({
         ...base,
         t: "session.error",
-        error: envelope(
+        error: makeToolError(
           "reflection",
           "EXEC_FAILED",
           `reached ${maxReflections} consecutive tool failures; stopping without success`,
@@ -194,7 +196,7 @@ async function executeBatch(
     if (!tool) {
       results.set(call.callId, {
         ok: false,
-        envelope: envelope(call.name, "VALIDATION", `unknown tool: ${call.name}`, false),
+        envelope: makeToolError(call.name, "VALIDATION", `unknown tool: ${call.name}`, false),
       });
       continue;
     }
@@ -225,7 +227,7 @@ async function executeBatch(
     if (decision.decision === "deny") {
       results.set(call.callId, {
         ok: false,
-        envelope: envelope(
+        envelope: makeToolError(
           call.name,
           decision.errorClass ?? "APPROVAL_DENIED",
           decision.reason,
@@ -257,24 +259,6 @@ async function executeBatch(
     await runOne(call, tool);
   }
   return results;
-}
-
-function envelope(
-  tool: string,
-  cls: ToolErrorEnvelope["error_class"],
-  msg: string,
-  retry: boolean,
-): ToolErrorEnvelope {
-  return { status: "error", tool, error_class: cls, user_message: msg, retry_allowed: retry };
-}
-
-function preview(args: unknown, max = 200): string {
-  try {
-    const s = JSON.stringify(args);
-    return s.length > max ? `${s.slice(0, max)}…` : s;
-  } catch {
-    return String(args).slice(0, max);
-  }
 }
 
 export function buildInterruptedEvent(

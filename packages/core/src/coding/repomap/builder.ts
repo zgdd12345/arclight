@@ -18,7 +18,6 @@ export function rankTags(tags: Tag[], opts: RankOptions = {}): RepoMapEntry[] {
   const defines = new Map<string, Set<string>>();
   const references = new Map<string, string[]>();
   const fileDefLines = new Map<string, Map<string, number[]>>(); // file → ident → lines
-  const fileNames = new Map<string, Set<string>>();
   const allFiles = new Set<string>();
 
   for (const t of tags) {
@@ -30,8 +29,6 @@ export function rankTags(tags: Tag[], opts: RankOptions = {}): RepoMapEntry[] {
       const dl = fileDefLines.get(t.relPath) as Map<string, number[]>;
       if (!dl.has(t.name)) dl.set(t.name, []);
       dl.get(t.name)?.push(t.line);
-      if (!fileNames.has(t.relPath)) fileNames.set(t.relPath, new Set());
-      fileNames.get(t.relPath)?.add(t.name);
     } else {
       if (!references.has(t.name)) references.set(t.name, []);
       references.get(t.name)?.push(t.relPath);
@@ -97,7 +94,7 @@ export function rankTags(tags: Tag[], opts: RankOptions = {}): RepoMapEntry[] {
     const rank = ranked.get(f) ?? 0;
     const dl = fileDefLines.get(f);
     const lines = dl ? [...new Set([...dl.values()].flat())].sort((a, b) => a - b) : [];
-    const names = fileNames.has(f) ? [...(fileNames.get(f) as Set<string>)] : [];
+    const names = dl ? [...dl.keys()] : []; // 符号名 = 该文件 def 标识符（即 fileDefLines 的 key）
     entries.push({ relPath: f, rank, lines, names });
   }
   entries.sort((a, b) => b.rank - a.rank);
