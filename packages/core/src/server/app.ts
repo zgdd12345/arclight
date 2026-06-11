@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import type { ApprovalPolicy } from "../approval/policy";
 import type { Db } from "../db/client";
 import type { EventBus } from "../events/bus";
 import type { AgentRunner } from "../loop/runner";
@@ -18,6 +19,7 @@ export type AppDeps = {
   bus: EventBus;
   token: string;
   runner?: AgentRunner; // 真实流水线（serve 注入）；缺省走 mock loop（测试）
+  approvals?: ApprovalPolicy; // C1 approve 决议入口
   heartbeatMs?: number; // 测试注入
   mockDeltaMs?: number; // 测试注入
 };
@@ -44,6 +46,7 @@ export function createApp(deps: AppDeps) {
       db: deps.db,
       bus: deps.bus,
       ...(deps.runner !== undefined ? { runner: deps.runner } : {}),
+      ...(deps.approvals !== undefined ? { approvals: deps.approvals } : {}),
       ...(deps.mockDeltaMs !== undefined ? { mockDeltaMs: deps.mockDeltaMs } : {}),
     }),
   );

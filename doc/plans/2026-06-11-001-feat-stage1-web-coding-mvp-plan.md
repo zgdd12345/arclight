@@ -246,7 +246,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 4: 权限审批往返——fail-closed（slice3）**
+- [x] **Unit 4: 权限审批往返——fail-closed（slice3）** ✅ 2026-06-11（presets 22 测 + service 7 测 + 审批集成 5 测全过；case-09 mock 与真实 GLM 均 PASS；黑名单确定性拦截以集成测为权威，真实模式断言安全不变量；tool_calls 行由 policy upsert，富生命周期落库随 U5/U6）
 
 **Goal:** 审批状态机 + 黑名单 + PermissionModal 往返闭环，golden case-09 过线。
 

@@ -195,7 +195,12 @@ async function executeBatch(
     if (decision.decision === "deny") {
       results.set(call.callId, {
         ok: false,
-        envelope: envelope(call.name, "APPROVAL_DENIED", decision.reason, false),
+        envelope: envelope(
+          call.name,
+          decision.errorClass ?? "APPROVAL_DENIED",
+          decision.reason,
+          false,
+        ),
       });
       return;
     }

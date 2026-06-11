@@ -14,8 +14,12 @@
     "hono": "^4.0.0",
     "node-pty": "^1.0.0",
     "pino": "^9.0.0",
+    "shell-quote": "^1.8.4",
     "tree-sitter-typescript": "^0.23.0",
     "web-tree-sitter": "^0.25.0",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/shell-quote": "^1.7.5"
   }
 }

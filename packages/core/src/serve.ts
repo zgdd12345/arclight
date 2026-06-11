@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pino } from "pino";
+import { ApprovalPolicy } from "./approval/policy";
 import { ArtifactStore } from "./artifacts/store";
 import { loadConfig } from "./config/load";
 import { createDb } from "./db/client";
@@ -51,6 +52,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     .register(writeFileTool as never)
     .register(applyPatchTool as never)
     .register(bashTool as never);
+  const approvals = new ApprovalPolicy(db, bus); // fail-closed：黑名单永拒 + confirm 弹审批
   const runner = new AgentRunner({
     db,
     bus,
@@ -62,10 +64,11 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
       ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
     }),
     executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
-    approvals: { check: async () => ({ decision: "allow" }) }, // U4 换 fail-closed 状态机
+    approvals,
+    onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
   });
 
-  const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner });
+  const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner, approvals });
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,

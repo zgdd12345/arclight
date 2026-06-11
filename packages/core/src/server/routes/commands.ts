@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ArcAck, parseArcCommand } from "@arclight/protocol";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import type { ApprovalPolicy } from "../../approval/policy";
 import type { Db } from "../../db/client";
 import { sessions, turns } from "../../db/schema";
 import type { EventBus } from "../../events/bus";
@@ -16,9 +17,10 @@ export function createCommandsRoute(deps: {
   db: Db;
   bus: EventBus;
   runner?: AgentRunner;
+  approvals?: ApprovalPolicy;
   mockDeltaMs?: number;
 }) {
-  const { db, bus, runner } = deps;
+  const { db, bus, runner, approvals } = deps;
 
   return new Hono().post("/", async (c) => {
     const parsed = parseArcCommand(await c.req.json().catch(() => null));
@@ -100,9 +102,15 @@ export function createCommandsRoute(deps: {
         runner?.interrupt(cmd.turnId); // abort 透传：callProvider 流 / 工具 signal / 沙箱 kill
         return c.json({ ok: true, commandId: cmd.commandId, turnId: cmd.turnId } satisfies ArcAck);
       }
-      case "approve":
-        // slice3 实装审批状态机
-        return c.json(ackErr(cmd.commandId, "ASK_NOT_FOUND", "approvals land in slice3"), 404);
+      case "approve": {
+        if (!approvals)
+          return c.json(ackErr(cmd.commandId, "ASK_NOT_FOUND", "approvals unavailable"), 404);
+        const status = approvals.decide(cmd.askId, cmd.decision);
+        // 决议落地（allowed/denied）或已终态（expired/cancelled）均回 ok；挂起的 loop 轮询感知
+        return c.json({ ok: true, commandId: cmd.commandId, status } as ArcAck & {
+          status: string;
+        });
+      }
       case "declareCap":
       case "resume":
         return c.json({ ok: true, commandId: cmd.commandId } satisfies ArcAck);

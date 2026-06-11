@@ -20,6 +20,7 @@ export type RunnerDeps = {
   callProvider: CallProvider;
   executeTool: LoopDeps["executeTool"];
   approvals: ApprovalSeam;
+  onInterrupt?: (turnId: string) => void; // 中断时收尾挂起审批等
   maxRetries?: number;
 };
 
@@ -97,8 +98,9 @@ export class AgentRunner {
     }
   }
 
-  /** interrupt 命令路径：abort 透传 callProvider / 工具 ctx.signal / 沙箱 kill */
+  /** interrupt 命令路径：abort 透传 callProvider / 工具 ctx.signal / 沙箱 kill；收尾挂起审批 */
   interrupt(turnId: string): boolean {
+    this.deps.onInterrupt?.(turnId); // 先转 cancelled，再 abort 解阻挂起的轮询
     for (const [, entry] of this.active) {
       if (entry.turnId === turnId) {
         entry.ac.abort();

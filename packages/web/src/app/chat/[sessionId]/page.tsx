@@ -7,6 +7,7 @@
 import type { ConnectionStatus } from "@arclight/client-core";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { PermissionModal } from "../../../components/approval/PermissionModal";
 import { ArcThread } from "../../../components/chat/ArcThread";
 import { SessionStatusBar } from "../../../components/session/SessionStatusBar";
 import { type ArcConnection, createArcConnection } from "../../../lib/arcClient";
@@ -46,6 +47,8 @@ export default function ChatPage() {
       <ArcRuntimeProvider sessionId={sessionId} store={conn.store} command={conn.command}>
         <SessionStatusBar status={status} />
         <ArcThread />
+        {/* 断电闸刀：信任面纪律②。挂在 provider 内以读 store.pendingApprovals；command 直传内核审批。 */}
+        <PermissionModal command={conn.command} />
       </ArcRuntimeProvider>
     </div>
   );

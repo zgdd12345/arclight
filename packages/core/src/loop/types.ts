@@ -47,8 +47,15 @@ export type CallProvider = (
   signal: AbortSignal,
 ) => AsyncGenerator<ProviderStreamPart, ProviderResult>;
 
-// ── 审批接缝（slice2：纯策略函数；slice3/U4 换完整状态机——pending/expired/cancelled）──
-export type ApprovalDecision = { decision: "allow" } | { decision: "deny"; reason: string };
+// ── 审批接缝（U4：完整状态机——pending/allowed/denied/expired/cancelled）──
+// errorClass 让策略层细分 deny 原因（DENIED/EXPIRED/PERMISSION_DENIED）；缺省 APPROVAL_DENIED。
+export type ApprovalDecision =
+  | { decision: "allow" }
+  | {
+      decision: "deny";
+      reason: string;
+      errorClass?: "APPROVAL_DENIED" | "APPROVAL_EXPIRED" | "PERMISSION_DENIED";
+    };
 export type ApprovalSeam = {
   check(
     tool: Tool<unknown, unknown>,
