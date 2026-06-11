@@ -112,6 +112,11 @@ export type LoopDeps = {
   maxRetries: number;
   retryDelayMs?: (attempt: number) => number; // 测试注入 0
   readConcurrency?: number; // 默认 8
+  /** 写工具执行前后的检查点钩子（DEV_PLAN §2.3 ③）。写工具 = !isReadOnly。 */
+  checkpoint?: {
+    pre(toolName: string): Promise<void>;
+    post(toolName: string): Promise<void>;
+  };
 };
 
 export type TurnOutcome = { status: "completed" | "failed" | "interrupted" };

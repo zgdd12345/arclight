@@ -279,7 +279,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M2 — 安全网就位
 
-- [ ] **Unit 5: 检查点 + `/undo` `/redo` + 编辑健壮性（slice4）**
+- [x] **Unit 5: 检查点 + `/undo` `/redo` + 编辑健壮性（slice4）** ✅ 2026-06-11（checkpoint 10 测 + edit/guard 29 测 + 检查点集成 4 测全过；shadow-git 借 cline 剥 VSCode、用户 .git 零干扰；undo/redo 自持 ref 栈正确截断 redo（修了 navigable-from-DB 无法建模分支的设计 bug）；EditGuard 省略号/截断守卫；Monaco DiffView 真懒加载；DiffView Monaco 默认走 CDN 待自托管，记账于下）
 
 **Goal:** shadow-git 检查点可一键回滚/恢复，EditGuard + fuzzy 阶梯健壮化，golden case-10 过线。
 

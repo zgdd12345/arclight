@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { Tool } from "@arclight/protocol";
 import { z } from "zod";
 import { applyEdit } from "../../coding/edit/apply";
+import { guardEditBlocks } from "../../coding/edit/guard";
 import { parseEditBlocks } from "../../coding/edit/parser";
 import { type CoreToolContext, ToolExecError } from "../registry";
 import { resolveInWorkspace } from "./readFile";
@@ -41,6 +42,16 @@ export const applyPatchTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>>
     const parsed = parseEditBlocks(input.patch);
     if (!parsed.ok)
       throw new ToolExecError(`patch parse failed: ${parsed.reason}`, "VALIDATION", true);
+
+    // EditGuard：apply 前拦截省略号未配对 / 截断占位（防偷懒省略丢代码）
+    const violations = guardEditBlocks(parsed.blocks);
+    if (violations.length > 0) {
+      throw new ToolExecError(
+        `edit guard rejected ${violations.length} block(s): ${violations.map((v) => `[#${v.block}] ${v.reason}`).join("; ")}`,
+        "VALIDATION",
+        true,
+      );
+    }
 
     // 全有或全无：先在内存中全部应用成功，再统一落盘（防半套编辑）
     const staged = new Map<string, { content: string; created: boolean }>();

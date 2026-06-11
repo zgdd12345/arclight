@@ -204,7 +204,12 @@ async function executeBatch(
       });
       return;
     }
-    results.set(call.callId, await deps.executeTool(tool, call.rawArgs, ctx));
+    // 写工具：执行前后检查点（pre 捕获改前态，post 捕获改后态，供 /undo /redo）
+    const isWrite = !tool.meta.isReadOnly;
+    if (isWrite && deps.checkpoint) await deps.checkpoint.pre(call.name);
+    const out = await deps.executeTool(tool, call.rawArgs, ctx);
+    results.set(call.callId, out);
+    if (isWrite && deps.checkpoint && out.ok) await deps.checkpoint.post(call.name);
   };
 
   // 读批：并发池

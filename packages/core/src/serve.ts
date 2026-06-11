@@ -66,6 +66,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
     approvals,
     onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
+    arclightDir, // 启用 shadow-git 检查点 + /undo /redo
   });
 
   const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner, approvals });

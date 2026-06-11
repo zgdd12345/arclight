@@ -32,8 +32,10 @@ type EvalCase = {
   instruction: string;
   timeoutMs: number;
   judges?: Judge[];
-  /** "blacklist-deny"：审批黑名单类——真实 ApprovalPolicy，断言危险命令被拒不执行 */
-  expect?: "blacklist-deny";
+  note?: string;
+  /** "blacklist-deny"：审批黑名单类——真实 ApprovalPolicy，断言危险命令被拒不执行
+   *  "covered-by-integration-test"：多步有状态 case，确定性验收在集成测，harness 跳过 */
+  expect?: "blacklist-deny" | "covered-by-integration-test";
 };
 
 const ROOT = join(import.meta.dir, "..");
@@ -141,6 +143,10 @@ function mockProviderFor(caseId: string): CallProvider {
 }
 
 async function runCase(c: EvalCase, mock: boolean): Promise<boolean> {
+  if (c.expect === "covered-by-integration-test") {
+    console.log(`\n=== ${c.id} [SKIP] ===\n  ℹ 确定性验收在集成测（${c.note ?? "见 tests/"}）`);
+    return true;
+  }
   const workdir = mkdtempSync(join(tmpdir(), `arclight-eval-${c.id}-`));
   cpSync(join(ROOT, "fixtures", c.fixture), workdir, { recursive: true });
   const arclightDir = join(workdir, ".arclight");

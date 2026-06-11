@@ -15,8 +15,14 @@ SSE 续接由自研 EventStreamManager（fetch + ReadableStream）实现。
 以下项目的代码/算法在本仓库中被借用或移植（仅 MIT/Apache-2.0 来源；闭源项目仅学习设计不复制）：
 
 - pi (MIT) — agent-loop 双层循环 + 钩子面结构参考（packages/core/src/loop/，控制反转重写为 generator）
-- aider (Apache-2.0) — repomap pagerank 权重算法、SEARCH/REPLACE editblock 解析阶梯（TS 重写，slice4/5 落地时补具体文件清单）
-- cline (Apache-2.0) — CheckpointTracker shadow-git 机制（剥离 VSCode 依赖移植，slice4 落地时补清单）
+- aider (Apache-2.0) — SEARCH/REPLACE editblock 解析阶梯 + EditGuard 启发（TS 重写）
+    落地：packages/core/src/coding/edit/{parser,apply,guard}.ts（阶梯 1-3 + did-you-mean 0.6 + 省略号/截断守卫）
+    repomap pagerank 权重算法待 slice5（U6）落地时补清单
+- cline (Apache-2.0) — CheckpointTracker shadow-git 机制（剥离 VSCode 依赖移植）
+    落地：packages/core/src/coding/checkpoint/{git-operations,tracker,undo-redo}.ts
+    机制移植：独立 GIT_DIR + --work-tree 隔离用户 .git；嵌套 .git 临时禁用 finally+重试；
+    pre/post-edit commit；reset --hard 恢复。VSCode 依赖（multi-root/folder-lock/gRPC）全删，
+    vscode.workspace→workTree 参数，globby→Node fs，sendCheckpointEvent→ArcEvent。TS 重写，非复制。
 - opencode (MIT) — compaction 摘要模板、apply-patch 解析器（slice5/2 落地时补清单）
 
 实际复制/移植代码落地时，须在本文件补充：来源文件路径、目标文件路径、修改说明。
