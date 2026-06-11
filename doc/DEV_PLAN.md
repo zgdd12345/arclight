@@ -460,15 +460,15 @@ Blocking 项任一 FAIL → `exit(1)` 并输出具体降级方案。
 
 ### 7.1 衔接索引
 
-| 主题 | 权威文档（绝对路径） | 本方案落点 |
+| 主题 | 权威文档（仓库相对路径） | 本方案落点 |
 |---|---|---|
-| 架构总览 / 平台分层 | `/Users/fsm/project/arclightagent/ARCHITECTURE_BLUEPRINT.md` | §0 执行摘要、§1 包边界 |
-| 协议契约（ArcEvent/Command/Ack）、Web 端、横切 | `/Users/fsm/project/arclightagent/FULL_PLATFORM_DESIGN.md`（§2 协议 / §4.1 Web / §5 横切） | §2.1 主循环事件流、§2.2 前端、§5 DoD |
-| 数据模型 12 表 / 工具契约 / 审批状态机 / 续接语义 / 拓扑鉴权 | `/Users/fsm/project/arclightagent/research/P0-基础三件套-拓扑-数据模型-工具契约.md` | §1.2 db/schema、§2.1 appendEvent、§2.2 续接三路径、§2.3 编码件接线 |
-| 全栈选型 / 许可证 / 自研量 / 第一周 smoke | `/Users/fsm/project/arclightagent/research/拿来即用-全栈选型清单.md`（§0.2 / §2.4 / §3 / §5） | §0 栈表、§1.4 依赖、§2 三大件自研量、§3.3 smoke |
-| nono 沙箱 / SandboxService / 三级回退 | `/Users/fsm/project/arclightagent/research/P0-沙箱方案-拿来即用.md` | §1.2 sandbox 目录、§2.3 bash@nono、§6 R3 |
-| 可借代码（MIT/Apache，仅借不抄闭源） | `pi/packages/agent/src/agent-loop.ts`（双层循环 + 钩子，MIT，可借，**callback→generator 控制反转重写**）；`claudecode/query.ts`（generator 范式，闭源，仅学）；`aider/aider/`（repomap/editblock，Apache）；`cline/`（CheckpointTracker，Apache，剥 VSCode） | §2.1 主循环、§2.3 编码链；归因落 `NOTICE` |
-| 工程实践 / 测试 / eval | `/Users/fsm/project/arclightagent/research/工程实践与测试eval策略.md` | §3 全节 |
+| 架构总览 / 平台分层 | `doc/ARCHITECTURE_BLUEPRINT.md` | §0 执行摘要、§1 包边界 |
+| 协议契约（ArcEvent/Command/Ack）、Web 端、横切 | `doc/FULL_PLATFORM_DESIGN.md`（§2 协议 / §4.1 Web / §5 横切） | §2.1 主循环事件流、§2.2 前端、§5 DoD |
+| 数据模型 12 表 / 工具契约 / 审批状态机 / 续接语义 / 拓扑鉴权 | `doc/research/P0-基础三件套-拓扑-数据模型-工具契约.md` | §1.2 db/schema、§2.1 appendEvent、§2.2 续接三路径、§2.3 编码件接线 |
+| 全栈选型 / 许可证 / 自研量 / 第一周 smoke | `doc/research/拿来即用-全栈选型清单.md`（§0.2 / §2.4 / §3 / §5） | §0 栈表、§1.4 依赖、§2 三大件自研量、§3.3 smoke |
+| nono 沙箱 / SandboxService / 三级回退 | `doc/research/P0-沙箱方案-拿来即用.md` | §1.2 sandbox 目录、§2.3 bash@nono、§6 R3 |
+| 可借代码（MIT/Apache，仅借不抄闭源） | `../references/pi/packages/agent/src/agent-loop.ts`（双层循环 + 钩子，MIT，可借，**callback→generator 控制反转重写**）；`../references/claudecode/query.ts`（generator 范式，闭源，仅学）；`../references/aider/aider/`（repomap/editblock，Apache）；`../references/cline/`（CheckpointTracker，Apache，剥 VSCode） | §2.1 主循环、§2.3 编码链；归因落 `NOTICE` |
+| 工程实践 / 测试 / eval | `doc/research/工程实践与测试eval策略.md` | §3 全节 |
 
 ### 7.2 决策记录（评审吸收留痕）
 

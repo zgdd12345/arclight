@@ -135,7 +135,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M0 — 骨架可跑
 
-- [ ] **Unit 1: 工程骨架贯通 + docker-fallback + smoke（slice0）**
+- [x] **Unit 1: 工程骨架贯通 + docker-fallback + smoke（slice0）** ✅ 2026-06-11（smoke：5 PASS + nono DEGRADED→docker-fallback；"12 张表"口径=11 域表+drizzle 记账表）
 
 **Goal:** 五包 monorepo 立起，`/health` 可 curl，12 张表迁移幂等，6 项 blocking smoke 全绿（含 docker-fallback），源文档同步修订完成。
 

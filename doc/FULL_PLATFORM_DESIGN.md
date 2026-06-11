@@ -305,7 +305,7 @@ type CapabilityProfile = {
 ┌─ @arclight/core (Bun+Hono) ─ Hono Router → Auth → 主循环 → SSE/媒体端点 ─┐
 ```
 
-**技术选型**:Next.js 15 App Router(MIT)/ Vercel AI SDK v6(**Apache-2.0**,`useChat` 流式)/ assistant-ui(MIT,无头)/ Monaco Editor(MIT,懒加载)/ marked+shiki(MIT)/ Tailwind v4+shadcn(MIT)/ Zustand(MIT)/ @serwist/next(MIT,PWA)/ web-push VAPID(MIT)/ @tanstack/react-virtual(MIT)/ Auth.js v5(ISC)。**刻意不引**:effect(beta)、LangChain/LangGraph、protobuf/buf、AG-UI 适配器(后置)。
+**技术选型**:Next.js 15 App Router(MIT)/ Vercel AI SDK v6(**Apache-2.0**,`streamText`，**仅内核侧**)/ assistant-ui(MIT,无头,`ExternalStoreRuntime`)/ Monaco Editor(MIT,懒加载)/ marked+shiki(MIT)/ Tailwind v4+shadcn(MIT)/ Zustand(MIT)/ @serwist/next(MIT,PWA)/ web-push VAPID(MIT)/ @tanstack/react-virtual(MIT)/ Auth.js v5(ISC)。**刻意不引**:effect(beta)、LangChain/LangGraph、protobuf/buf、AG-UI 适配器(后置)、**`@assistant-ui/react-ai-sdk`（D1 选型修订移除，见 DEV_PLAN §7.2）**。
 
 **能力裁剪**:写代码/写文章/调研=主场(无裁剪);computer-use=主场(云浏览器,MVP 不交付,组件占位);日常规划=可用非主场(Web Push 在 iOS Safari 仅 PWA 装主屏才生效,稳定性弱于移动原生,阶段五交付)。
 
