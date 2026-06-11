@@ -173,7 +173,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 2: SSE 续接闭环——事件流脊柱（slice1）**
+- [x] **Unit 2: SSE 续接闭环——事件流脊柱（slice1）** ✅ 2026-06-11（续接①②真实端到端通过；③epoch-jump mock 触发通过，真实回归绑 Unit 6；集成测位于 tests/ 维持包依赖纪律）
 
 **Goal:** seq/epoch 事件流打通：C1 提交、C2 SSE replay、断线重连无缝续上；client-core 三纪律 reducer 就位。
 

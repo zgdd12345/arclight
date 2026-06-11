@@ -9,7 +9,7 @@
   "scripts": {
     "dev:core": "bun --hot packages/core/src/serve.ts --repo .",
     "test": "vitest run",
-    "test:core": "bun test packages/core",
+    "test:core": "bun test packages/core tests",
     "check": "biome check .",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate --config=packages/core/drizzle.config.ts",
