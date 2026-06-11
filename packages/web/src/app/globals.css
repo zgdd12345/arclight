@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/*
+  CARBON ARC 设计令牌 —— 源真相见仓库根 DESIGN.md。
+  Dark "Night Bench" 为默认（第一公民）；Light "Drafting Vellum" 经 [data-theme="light"]。
+  硬规则：暖碳黑底（永不蓝黑）/ 灯丝琥珀唯一 accent / 机器产出一律 mono / radius 0 / hazard 红仅审批面。
+*/
+
+:root,
+[data-theme="dark"] {
+  /* Dark · Night Bench */
+  --base: #14110e;
+  --surface: #1c1813;
+  --panel: #262019;
+  --hairline: #3a3128;
+  --text: #ece3d4;
+  --muted: #9a8f7f;
+  --accent: #f4933a;
+  --accent-hot: #ffc56b;
+  --violet: #a07bff;
+  --positive: #7fb069;
+  --brass: #c9a86a;
+  --hazard: #ff4d2e;
+  --del-ash: #6b5f52;
+}
+
+[data-theme="light"] {
+  /* Light · Drafting Vellum（完整暖 vellum 设计，非反色） */
+  --base: #f4eee1;
+  --surface: #fbf7ee;
+  --panel: #efe7d6;
+  --hairline: #d8cdb8;
+  --text: #221c14;
+  --muted: #6e6354;
+  --accent: #b85a10;
+  --accent-hot: #d97a1f;
+  --violet: #5b3fd6;
+  --positive: #4f7a3d;
+  --brass: #8a6f35;
+  --hazard: #c62a12;
+  --del-ash: #a89a87;
+}
+
+/* @theme inline：令牌以 var() 直引，故 [data-theme] 运行时切换即时生效 */
+@theme inline {
+  --color-base: var(--base);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-hairline: var(--hairline);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hot: var(--accent-hot);
+  --color-violet: var(--violet);
+  --color-positive: var(--positive);
+  --color-brass: var(--brass);
+  --color-hazard: var(--hazard);
+  --color-del-ash: var(--del-ash);
+
+  /* 双声道字体（DESIGN.md Typography）：人声 Hanken / 机器声 Commit Mono / 大时刻 Fraunces */
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-mono: "Commit Mono", "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+
+  /* radius 0 为默认（制图美学，方角）；仅圆点/头像允许圆形 */
+  --radius-none: 0px;
+
+  /* 间距基 4px（DESIGN.md Spacing） */
+  --spacing: 4px;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--base);
+    color: var(--text);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 机器声：路径/数字/命令/输出一律 mono */
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+  }
+
+  ::selection {
+    background-color: var(--accent);
+    color: var(--base);
+  }
+}
+
+/*
+  签名动效 —— 灯丝呼吸（DESIGN.md Motion）：Agent 思考时琥珀圆点 2.2s 呼吸发光。
+  尊重 prefers-reduced-motion。
+*/
+@keyframes filament-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+    background-color: var(--accent);
+  }
+  50% {
+    box-shadow: 0 0 7px 2px color-mix(in srgb, var(--accent-hot) 70%, transparent);
+    background-color: var(--accent-hot);
+  }
+}
+
+.filament {
+  animation: filament-breathe 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filament {
+    animation: none;
+  }
+}

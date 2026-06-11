@@ -1,0 +1,11 @@
+{
+  "id": "case-04-add-types",
+  "fixture": "mini-ts",
+  "instruction": "为 src/math.ts 新增一个 Point 类型（x: number, y: number）并导出一个 distance(a: Point, b: Point): number 函数计算欧氏距离。保持 add 不变。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "src/math.ts", "text": "Point" },
+    { "kind": "file-contains", "path": "src/math.ts", "text": "distance" },
+    { "kind": "ts-parses", "path": "src/math.ts" }
+  ]
+}

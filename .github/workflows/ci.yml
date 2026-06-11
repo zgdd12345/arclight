@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2"
+      - name: Install
+        run: bun install
+      - name: Rebuild native (node-pty)
+        run: cd packages/core/node_modules/node-pty && npx node-gyp rebuild || true
+      - name: Biome check
+        run: bunx biome check .
+      - name: Typecheck
+        run: bunx tsc --noEmit
+      - name: Unit tests (vitest)
+        run: bunx vitest run
+      - name: Core + integration tests (bun)
+        run: bun run test:core
+      - name: Native smoke test
+        # docker-fallback 沙箱在 GH Actions 可用；nono 缺失自动降级（"全绿或明确降级"）
+        run: bun run smoke

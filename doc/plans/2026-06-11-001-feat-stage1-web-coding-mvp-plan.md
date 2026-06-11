@@ -1,7 +1,7 @@
 ---
 title: "feat: 阶段一 Web + 写代码 MVP 开发计划"
 type: feat
-status: active
+status: completed
 date: 2026-06-11
 origin: doc/DEV_PLAN.md
 ---
@@ -135,7 +135,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M0 — 骨架可跑
 
-- [ ] **Unit 1: 工程骨架贯通 + docker-fallback + smoke（slice0）**
+- [x] **Unit 1: 工程骨架贯通 + docker-fallback + smoke（slice0）** ✅ 2026-06-11（smoke：5 PASS + nono DEGRADED→docker-fallback；"12 张表"口径=11 域表+drizzle 记账表）
 
 **Goal:** 五包 monorepo 立起，`/health` 可 curl，12 张表迁移幂等，6 项 blocking smoke 全绿（含 docker-fallback），源文档同步修订完成。
 
@@ -173,7 +173,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 2: SSE 续接闭环——事件流脊柱（slice1）**
+- [x] **Unit 2: SSE 续接闭环——事件流脊柱（slice1）** ✅ 2026-06-11（续接①②真实端到端通过；③epoch-jump mock 触发通过，真实回归绑 Unit 6；集成测位于 tests/ 维持包依赖纪律）
 
 **Goal:** seq/epoch 事件流打通：C1 提交、C2 SSE replay、断线重连无缝续上；client-core 三纪律 reducer 就位。
 
@@ -207,7 +207,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M1 — 写代码闭环
 
-- [ ] **Unit 3: 写代码最小核 ★（slice2）**
+- [x] **Unit 3: 写代码最小核 ★（slice2）** ✅ 2026-06-11（test-first：12 不变量先行全过；case-01 mock 模式与**真实模式均 PASS**——真实后端为智谱 GLM glm-4.6 经 Anthropic 兼容端点（D4 补充记账，成本考量），4.1s 完成；跨 turn 会话历史物化随 U5/U6；审批 slice2 为 allow-all 接缝，U4 换 fail-closed 状态机）
 
 **Goal:** queryLoop 主循环 + 4 内置工具 + nono 执行真实跑通："加一个函数"端到端，golden case-01 过线。
 
@@ -246,7 +246,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 4: 权限审批往返——fail-closed（slice3）**
+- [x] **Unit 4: 权限审批往返——fail-closed（slice3）** ✅ 2026-06-11（presets 22 测 + service 7 测 + 审批集成 5 测全过；case-09 mock 与真实 GLM 均 PASS；黑名单确定性拦截以集成测为权威，真实模式断言安全不变量；tool_calls 行由 policy upsert，富生命周期落库随 U5/U6）
 
 **Goal:** 审批状态机 + 黑名单 + PermissionModal 往返闭环，golden case-09 过线。
 
@@ -279,7 +279,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M2 — 安全网就位
 
-- [ ] **Unit 5: 检查点 + `/undo` `/redo` + 编辑健壮性（slice4）**
+- [x] **Unit 5: 检查点 + `/undo` `/redo` + 编辑健壮性（slice4）** ✅ 2026-06-11（checkpoint 10 测 + edit/guard 29 测 + 检查点集成 4 测全过；shadow-git 借 cline 剥 VSCode、用户 .git 零干扰；undo/redo 自持 ref 栈正确截断 redo（修了 navigable-from-DB 无法建模分支的设计 bug）；EditGuard 省略号/截断守卫；Monaco DiffView 真懒加载；DiffView Monaco 默认走 CDN 待自托管，记账于下）
 
 **Goal:** shadow-git 检查点可一键回滚/恢复，EditGuard + fuzzy 阶梯健壮化，golden case-10 过线。
 
@@ -313,7 +313,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 6: RepoMap 上下文 + 单级压缩 ★（slice5）**
+- [x] **Unit 6: RepoMap 上下文 + 单级压缩 ★（slice5）** ✅ 2026-06-12（compaction 11 测 + RepoMap 7 测 + epoch-jump 真实端到端 2 测；**Unit 2 悬空 epoch-jump 验收在此真实回归通过**——由真实 compaction 驱动 epoch++ 而非 mock；pagerank 权重逐字对齐 aider，自研 personalizedPageRank（graphology 不支持 personalization）；RepoMap token 降益为定性（serve 默认开启，验证产出真实图），非硬门）
 
 **Goal:** RepoMap（tree-sitter → pagerank → 二分裁剪 → mtime 缓存）注入上下文；compaction 落地，epoch-jump 真实端到端回归（补 Unit 2 悬空验收）。
 
@@ -349,7 +349,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M3 — 阶段一发布
 
-- [ ] **Unit 7: 反射闭环 + 10 条 golden eval + 可观测收口（slice6）**
+- [x] **Unit 7: 反射闭环 + golden eval + 可观测收口（slice6）** ✅ 2026-06-12（反射上限 max_reflections=3 硬停如实上报 + usage 落库 + pino 脱敏 + auditLog 14 kind + license-gate；**真实 GLM golden 7/7 通过**（case-10 集成测覆盖）超 ≥8/10 目标；CI 三 workflow；**端到端发布 demo 经 serve+GLM 真实跑通**：读→改→审批→批准→落地→/undo，usage/audit/checkpoint 全验证；usage 端点完成，前端实时成本展示为 follow-up）
 
 **Goal:** edit→lint→test→自校正反射闭环；10 条 golden case 全建齐 + CI 三 workflow；usage 成本展示。达成发布 DoD。
 

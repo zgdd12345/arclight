@@ -1,0 +1,10 @@
+{
+  "name": "@arclight/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "CLI 壳占位（P2：commander + bun --compile 入口）",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

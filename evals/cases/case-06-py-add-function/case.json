@@ -1,0 +1,10 @@
+{
+  "id": "case-06-py-add-function",
+  "fixture": "py-mini",
+  "instruction": "在 calc.py 中新增一个 multiply(a, b) 函数返回乘积，保持现有 add 函数不变。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "calc.py", "text": "def multiply" },
+    { "kind": "file-contains", "path": "calc.py", "text": "def add" }
+  ]
+}

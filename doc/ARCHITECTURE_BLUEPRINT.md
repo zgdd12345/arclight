@@ -104,7 +104,7 @@
 | **语言/运行时** | **TypeScript + Bun**(内核服务);沙箱 helper 可 **Rust** | 网页优先=前后端同构、生态最大、迭代最快;5 个 TS 仓提供可直接移植实现 | **Rust(codex)**:迭代陡、~120 crate 负担过大,仅借架构原则;**Python(MetaGPT/OpenHands/opensquilla)**:前后端割裂,仅作子系统设计参考移植 |
 | **后端框架** | **Hono**(轻量、Bun/Edge 友好、TS 原生) | 与 Bun 一等公民、可部署本地/远程/Workers 边缘 | Express(性能弱)、Next.js API routes(与前端耦合) |
 | **前端框架** | **Next.js (App Router)** 主选 | TS 全栈、生态/招聘最大、assistant-ui & Vercel AI SDK 原生适配、PWA 可"安装到桌面" | SolidStart(生态小);纯 React SPA(失 SSR) |
-| **前端 AI 层** | **Vercel AI SDK v6**(streamText/useChat)+ **assistant-ui** | provider 抽象、useChat resume、流式 UI 不造轮子 | 自写流式 UI(重复造轮子) |
+| **前端 AI 层** | **assistant-ui**（`ExternalStoreRuntime`）+ 自研 **EventStreamManager**（手写 fetch+ReadableStream SSE）；内核侧仍用 `ai` v6（`streamText`，**仅内核侧**） | ArcEvent epoch/resync/审批语义无法硬套 UIMessage 协议；ExternalStore 保语义完整；前端不引 `ai`/`react-ai-sdk` | ~~`AISDKRuntime`（`@assistant-ui/react-ai-sdk`）+ `useChat resume`~~（丢 epoch 续接与审批往返）；自写流式 UI（重复造轮子）。（选型修订 D1/D2，见 DEV_PLAN §7.2） |
 | **内核↔表层协议** | **MVP:单 repo 共享 TS 类型 + HTTP/SSE。后续:OpenAPI→TS SDK 自动生成 + AG-UI 适配器** | MVP 只有 Web 一端,零 codegen;真有第二端再上 SDK 生成。**注意 OpenAPI 对 SSE/流式事件表达力弱,SDK 自动生成不是「免费」的,需预留自建 codegen 预算**(见 B4) | codex SQ/EQ + ts-rs;cline gRPC-over-postMessage(protobuf 重) |
 | **数据层** | **SQLite(本地/单用户)→ Postgres(多端/服务化)**,ORM 用 Drizzle | 单机够用 + 乐观锁 epoch;服务化撞墙时平滑迁 Postgres。**多租户隔离另有专门设计(见 §5.6),epoch 是并发控制不是隔离** | 纯文件 JSONL(无并发/查询);纯向量库(失结构化事务) |
 | **缓存/流恢复** | **MVP:仅「刷新不丢」最朴素版(服务端 buffer + 重连续推)。后续:Redis + vercel/resumable-stream** | 把 SSE 断线重连后的事件 replay 去重 + epoch 冲突合并 UX 这类高 bug 密度特性后置到阶段二 UX 验证之后 | MVP 期全量 durable(把最高风险压最早期) |

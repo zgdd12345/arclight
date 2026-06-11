@@ -1,0 +1,8 @@
+{
+  "id": "case-10-checkpoint-restore",
+  "fixture": "mini-ts",
+  "instruction": "（检查点恢复 case）权威验收为 tests/checkpoint.integration.test.ts。",
+  "timeoutMs": 60000,
+  "expect": "covered-by-integration-test",
+  "note": "checkpoint/undo/redo 需多步有状态序列（写→undo→redo→新写清空 redo→用户 .git 零干扰），确定性验收放集成测（真实 HTTP 全链），非单指令 golden。harness 跳过此 case，记账于此。U7 的 10 条 golden 全集落地时再评估是否纳入脚本化多步 case。"
+}

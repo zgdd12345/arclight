@@ -1,0 +1,10 @@
+# Next.js 生成物
+/.next/
+/out/
+next-env.d.ts
+
+# 依赖
+/node_modules/
+
+# 调试日志
+*.tsbuildinfo

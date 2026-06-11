@@ -1,0 +1,11 @@
+{
+  "id": "case-02-fix-bug",
+  "fixture": "mini-ts",
+  "instruction": "src/auth.ts 的 verifyToken 有 bug：payload.exp 是秒级 Unix 时间戳，但代码直接与毫秒级 Date.now() 比较。修复它（exp 比较前乘以 1000）。保持函数签名不变。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "src/auth.ts", "text": "* 1000" },
+    { "kind": "file-contains", "path": "src/auth.ts", "text": "export function verifyToken" },
+    { "kind": "ts-parses", "path": "src/auth.ts" }
+  ]
+}

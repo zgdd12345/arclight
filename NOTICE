@@ -1,0 +1,38 @@
+arclight — NOTICE
+
+本文件记录第三方代码归因（Apache-2.0 等许可证义务）与重大选型修订决策。
+
+== 选型修订决策记录 ==
+
+D1/D2（2026-06-11，对抗式评审吸收，详见 doc/DEV_PLAN.md §7.2）：
+前端 Runtime 由源文档原定的 AISDKRuntime（@assistant-ui/react-ai-sdk + useChat resume）
+正式修订为 @assistant-ui/react 的 ExternalStoreRuntime；前端零 `ai` 运行时依赖，
+SSE 续接由自研 EventStreamManager（fetch + ReadableStream）实现。
+`@assistant-ui/react-ai-sdk` 已从依赖清单移除。
+
+== 第三方代码归因 ==
+
+以下项目的代码/算法在本仓库中被借用或移植（仅 MIT/Apache-2.0 来源；闭源项目仅学习设计不复制）：
+
+- pi (MIT) — agent-loop 双层循环 + 钩子面结构参考（packages/core/src/loop/，控制反转重写为 generator）
+- aider (Apache-2.0) — SEARCH/REPLACE editblock 解析阶梯 + EditGuard 启发 + RepoMap pagerank（TS 重写）
+    edit：packages/core/src/coding/edit/{parser,apply,guard}.ts（阶梯 1-3 + did-you-mean 0.6 + 省略号/截断守卫）
+    repomap：packages/core/src/coding/repomap/{tag-extractor,builder,pagerank,cache,index}.ts
+    pagerank 权重逐字对齐 aider repomap.py:487-514（mentioned×10、长标识符三风格 len>=8 ×10、私有名×0.1、
+    过度定义×0.1、chat referencer×50、num_refs→sqrt、personalize=100/num_files）。
+    自研 personalizedPageRank（graphology-metrics 不支持 personalization，aider chat-boost 核心依赖之）。
+    二分裁剪 mid=floor(maxTokens/25) 容差 0.15。tree-sitter 不可用自动正则降级（R2）。
+- cline (Apache-2.0) — CheckpointTracker shadow-git 机制（剥离 VSCode 依赖移植）
+    落地：packages/core/src/coding/checkpoint/{git-operations,tracker,undo-redo}.ts
+    机制移植：独立 GIT_DIR + --work-tree 隔离用户 .git；嵌套 .git 临时禁用 finally+重试；
+    pre/post-edit commit；reset --hard 恢复。VSCode 依赖（multi-root/folder-lock/gRPC）全删，
+    vscode.workspace→workTree 参数，globby→Node fs，sendCheckpointEvent→ArcEvent。TS 重写，非复制。
+- opencode (MIT) — compaction 结构化摘要模板（packages/core/src/loop/compaction.ts，单级压缩）、
+    apply-patch 第二解析器设计（待 U7 多解析器时补）
+
+实际复制/移植代码落地时，须在本文件补充：来源文件路径、目标文件路径、修改说明。
+
+D4 补充（2026-06-11）：阶段一 provider 协议维持 Anthropic Messages 单协议，
+实际后端采用智谱 GLM 的 Anthropic 兼容端点（open.bigmodel.cn/api/anthropic，模型 glm-4.6），
+成本考量（Anthropic 官方 API 价格较高）。provider-adapter 不变，仅 baseUrl/model 配置化。
+golden eval 真实模式以 GLM 为基准跑。
