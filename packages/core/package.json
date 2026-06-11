@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.82",
+    "@anthropic-ai/tokenizer": "^0.0.4",
     "@arclight/protocol": "workspace:*",
     "ai": "^6",
     "drizzle-orm": "^0.44.0",

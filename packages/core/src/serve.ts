@@ -67,6 +67,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     approvals,
     onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
     arclightDir, // 启用 shadow-git 检查点 + /undo /redo
+    repoMap: true, // 进 turn 注入 RepoMap 上下文（tree-sitter 不可用自动正则降级）
   });
 
   const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner, approvals });

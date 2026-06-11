@@ -37,6 +37,14 @@ export async function* queryLoop(
   while (true) {
     if (signal.aborted) return yield* interruptedOutcome();
 
+    // ── (A) 压缩边界：在两次 provider 调用之间（绝不在流式中途 / tool 配对未完成时）──
+    if (deps.compaction) {
+      const compacted = await deps.compaction.maybeCompact(st.messages);
+      if (compacted) {
+        yield emit({ ...base, t: "context.compacted", summarySeq: compacted.summarySeq });
+      }
+    }
+
     // ── (C) 单 turn provider 调用（流式 part → message.delta 合批）──
     const messageId = `m-${st.turnId}-${round}`;
     const gen = deps.callProvider(st.messages, deps.registry.schemas(), signal);

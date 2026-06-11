@@ -1,11 +1,13 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { CheckpointTracker } from "../coding/checkpoint/tracker";
 import { UndoRedoController } from "../coding/checkpoint/undo-redo";
+import { RepoMap } from "../coding/repomap/index";
 import { appendEvent } from "../db/appendEvent";
 import type { Db } from "../db/client";
 import { sessions, turns, workspaces } from "../db/schema";
 import type { EventBus } from "../events/bus";
 import type { ToolRegistry } from "../tools/registry";
+import { type CompactResult, compact, shouldCompact } from "./compaction";
 import { queryLoop } from "./query-loop";
 import type { ApprovalSeam, CallProvider, LoopDeps, LoopState } from "./types";
 
@@ -24,6 +26,11 @@ export type RunnerDeps = {
   approvals: ApprovalSeam;
   onInterrupt?: (turnId: string) => void; // 中断时收尾挂起审批等
   arclightDir?: string; // 启用 shadow-git 检查点（缺省禁用，便于测试）
+  /** 压缩 provider（缺省 = callProvider；测试可注入轻量摘要器） */
+  compactProvider?: CallProvider;
+  effectiveWindow?: number; // 压缩触发窗口（测试压低）
+  repoMap?: boolean; // 进 turn 前注入 RepoMap 上下文（弹性，缺省关）
+  repoMapTokens?: number; // RepoMap token 预算（默认 1024）
   maxRetries?: number;
 };
 
@@ -136,12 +143,21 @@ export class AgentRunner {
     }
 
     const sc = this.getCheckpoint(sessionId, cwd);
-    const state: LoopState = {
-      sessionId,
-      turnId,
-      cwd,
-      messages: [{ role: "user", content: args.userText }],
-    };
+
+    // RepoMap 注入（弹性）：进 turn 前生成仓库符号图，作上下文前缀。失败/不可用静默跳过。
+    const messages: LoopState["messages"] = [];
+    if (this.deps.repoMap) {
+      const mapText = await this.buildRepoMap(cwd, args.userText).catch(() => "");
+      if (mapText) {
+        messages.push({
+          role: "user",
+          content: `[Repository context — most relevant symbols by reference graph]\n${mapText}`,
+        });
+      }
+    }
+    messages.push({ role: "user", content: args.userText });
+
+    const state: LoopState = { sessionId, turnId, cwd, messages };
     const loopDeps: LoopDeps = {
       emit,
       callProvider: this.deps.callProvider,
@@ -165,6 +181,29 @@ export class AgentRunner {
             },
           }
         : {}),
+      compaction: {
+        maybeCompact: async (messages) => {
+          if (!shouldCompact(messages, this.deps.effectiveWindow)) return null;
+          const provider = this.deps.compactProvider ?? this.deps.callProvider;
+          let result: CompactResult | null;
+          try {
+            result = await compact(messages, provider, ac.signal);
+          } catch {
+            return null; // 压缩失败不阻断 turn
+          }
+          if (!result) return null;
+          // 原地替换消息（loop 持同一数组引用）
+          messages.splice(0, messages.length, ...result.messages);
+          // 先 epoch++（DB 权威），后 yield context.compacted——appendEvent 将 stamp 新 epoch
+          const row = db
+            .update(sessions)
+            .set({ epoch: sql`${sessions.epoch} + 1`, summary: result.summaryText.slice(0, 4000) })
+            .where(eq(sessions.id, sessionId))
+            .returning({ epoch: sessions.epoch, nextSeq: sessions.nextSeq })
+            .get();
+          return { epoch: row?.epoch ?? 0, summarySeq: row?.nextSeq ?? 1 };
+        },
+      },
     };
 
     db.update(turns)
@@ -198,6 +237,30 @@ export class AgentRunner {
     } finally {
       ac.abort(); // 清理在途（沙箱 run / provider 流）
       this.active.delete(sessionId);
+    }
+  }
+
+  /** 枚举工作区源文件（有界）→ RepoMap 文本。tree-sitter 不可用自动正则降级（R2）。
+   *  mentioned 标识符从用户输入粗提；chatFiles 暂空（U7 接 active turn 涉及文件）。 */
+  private async buildRepoMap(cwd: string, userText: string): Promise<string> {
+    const glob = new Bun.Glob("**/*.{ts,tsx,js,jsx}");
+    const files: string[] = [];
+    for await (const f of glob.scan({ cwd, onlyFiles: true })) {
+      if (/node_modules|\.arclight|dist|build|\.next|migrations/.test(f)) continue;
+      files.push(f);
+      if (files.length >= 200) break; // 有界，防超大仓拖慢
+    }
+    if (files.length === 0) return "";
+    const mentioned = new Set(
+      (userText.match(/\b[A-Za-z_$][A-Za-z0-9_$]{2,}\b/g) ?? []).slice(0, 40),
+    );
+    const rm = new RepoMap(cwd, this.deps.arclightDir);
+    try {
+      return await rm.generate(files, this.deps.repoMapTokens ?? 1024, {
+        mentionedIdents: mentioned,
+      });
+    } finally {
+      rm.close();
     }
   }
 

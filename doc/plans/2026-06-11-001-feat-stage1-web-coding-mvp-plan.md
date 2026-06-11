@@ -313,7 +313,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ---
 
-- [ ] **Unit 6: RepoMap 上下文 + 单级压缩 ★（slice5）**
+- [x] **Unit 6: RepoMap 上下文 + 单级压缩 ★（slice5）** ✅ 2026-06-12（compaction 11 测 + RepoMap 7 测 + epoch-jump 真实端到端 2 测；**Unit 2 悬空 epoch-jump 验收在此真实回归通过**——由真实 compaction 驱动 epoch++ 而非 mock；pagerank 权重逐字对齐 aider，自研 personalizedPageRank（graphology 不支持 personalization）；RepoMap token 降益为定性（serve 默认开启，验证产出真实图），非硬门）
 
 **Goal:** RepoMap（tree-sitter → pagerank → 二分裁剪 → mtime 缓存）注入上下文；compaction 落地，epoch-jump 真实端到端回归（补 Unit 2 悬空验收）。
 

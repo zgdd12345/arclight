@@ -117,6 +117,11 @@ export type LoopDeps = {
     pre(toolName: string): Promise<void>;
     post(toolName: string): Promise<void>;
   };
+  /** 压缩钩子（DEV_PLAN §2.1）。在两次 provider 调用之间检查并执行；返回新 epoch + summary。
+   *  loop 凭返回值 yield context.compacted。绝不在 tool 配对未完成时调用。 */
+  compaction?: {
+    maybeCompact(messages: LlmMessage[]): Promise<{ epoch: number; summarySeq: number } | null>;
+  };
 };
 
 export type TurnOutcome = { status: "completed" | "failed" | "interrupted" };
