@@ -3,7 +3,16 @@
 // 模式：默认真实 provider（需 ANTHROPIC_API_KEY）；ARCLIGHT_EVAL_MOCK=1 用脚本化 provider
 // 验证除 LLM 外的全链（CI 冒烟用；golden 红线判定必须真实模式）。
 // 后续（U7）：10 case 全集、LLM soft judge、tokens/cost metrics、eval.yml 接线。
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApprovalPolicy } from "../../packages/core/src/approval/policy";
@@ -83,6 +92,9 @@ function runJudges(
   });
 }
 
+/** mock 模式不支持脚本的 case（只有 01/09 有脚本）→ 跳过标记 */
+const MOCK_SCRIPTED = new Set(["case-01-add-function", "case-09-approval-write"]);
+
 /** mock provider：read → apply_patch → 收尾（验证除 LLM 外全链） */
 function mockProviderFor(caseId: string): CallProvider {
   if (caseId === "case-09-approval-write") {
@@ -142,9 +154,23 @@ function mockProviderFor(caseId: string): CallProvider {
   };
 }
 
+type CaseResult = {
+  id: string;
+  status: "pass" | "fail" | "skip";
+  durationMs: number;
+  turns: number;
+};
+const summary: CaseResult[] = [];
+
 async function runCase(c: EvalCase, mock: boolean): Promise<boolean> {
   if (c.expect === "covered-by-integration-test") {
     console.log(`\n=== ${c.id} [SKIP] ===\n  ℹ 确定性验收在集成测（${c.note ?? "见 tests/"}）`);
+    summary.push({ id: c.id, status: "skip", durationMs: 0, turns: 0 });
+    return true;
+  }
+  if (mock && !MOCK_SCRIPTED.has(c.id)) {
+    console.log(`\n=== ${c.id} [SKIP] ===\n  ℹ mock 模式无脚本（真实模式以 GLM 跑）`);
+    summary.push({ id: c.id, status: "skip", durationMs: 0, turns: 0 });
     return true;
   }
   const workdir = mkdtempSync(join(tmpdir(), `arclight-eval-${c.id}-`));
@@ -258,6 +284,10 @@ async function runCase(c: EvalCase, mock: boolean): Promise<boolean> {
       pass = status === "completed" && judges.every((j) => j.pass);
       for (const j of judges) console.log(`  ${j.pass ? "✓" : "✗"} ${j.name} — ${j.detail}`);
     }
+    const turns =
+      sqlite.query<{ n: number }, []>("SELECT count(*) n FROM turns WHERE session_id='eval'").get()
+        ?.n ?? 0;
+    summary.push({ id: c.id, status: pass ? "pass" : "fail", durationMs, turns });
     console.log(pass ? "PASS" : "FAIL");
     return pass;
   } finally {
@@ -275,12 +305,36 @@ if (!mock && !process.env.ANTHROPIC_API_KEY && !process.env.ZHIPU_API_KEY) {
   );
   process.exit(2);
 }
-const caseDirs = readdirSync(join(ROOT, "cases"));
+const caseDirs = readdirSync(join(ROOT, "cases")).sort();
 const filter = process.argv[2];
 let allPass = true;
 for (const dir of caseDirs) {
   if (filter && !dir.includes(filter)) continue;
   const c = JSON.parse(readFileSync(join(ROOT, "cases", dir, "case.json"), "utf8")) as EvalCase;
   if (!(await runCase(c, mock))) allPass = false;
+}
+
+// ── 汇总 results/summary.json + 控制台报告（DEV_PLAN §3.2 metrics）──
+const passed = summary.filter((s) => s.status === "pass").length;
+const failed = summary.filter((s) => s.status === "fail").length;
+const skipped = summary.filter((s) => s.status === "skip").length;
+const scored = passed + failed;
+const resultsDir = join(ROOT, "results");
+mkdirSync(resultsDir, { recursive: true });
+writeFileSync(
+  join(resultsDir, "summary.json"),
+  JSON.stringify(
+    { mode: mock ? "mock" : "real", passed, failed, skipped, scored, cases: summary },
+    null,
+    2,
+  ),
+);
+console.log(`\n──────── GOLDEN SUMMARY (${mock ? "MOCK" : "REAL"}) ────────`);
+console.log(`通过 ${passed}/${scored}（跳过 ${skipped}）→ results/summary.json`);
+if (scored > 0) {
+  const avgMs = Math.round(
+    summary.filter((s) => s.status !== "skip").reduce((a, s) => a + s.durationMs, 0) / scored,
+  );
+  console.log(`平均耗时 ${avgMs}ms · 评分 case ${scored} 条`);
 }
 process.exit(allPass ? 0 : 1);

@@ -33,6 +33,8 @@ export async function* queryLoop(
 
   let retries = 0;
   let round = 0;
+  let reflections = 0; // 连续工具全失败轮数（反射闭环计数）
+  const maxReflections = deps.maxReflections ?? 3;
   // 外层 follow-up 队列位（U4+ 接 steering/followUp；slice2 单轮链）
   while (true) {
     if (signal.aborted) return yield* interruptedOutcome();
@@ -68,6 +70,7 @@ export async function* queryLoop(
     }
 
     // ── (D) finishReason 分流（callProvider 永不 throw）──
+    if (res.usage) deps.onUsage?.(res.usage); // usage 落库（每轮 provider 调用）
     if (res.finishReason === "aborted") return yield* interruptedOutcome();
     if (res.finishReason === "error") {
       if (res.retryable === true && retries < deps.maxRetries) {
@@ -151,6 +154,25 @@ export async function* queryLoop(
         content: out.ok ? out.preview : JSON.stringify(out.envelope),
         isError: !out.ok,
       });
+    }
+
+    // ── 反射闭环上限（DEV_PLAN §2.3 ④）：本轮工具全失败 → 反射计数 +1；任一成功 → 复位。
+    // 达上限即硬停，如实上报不假装成功——失败已在 tool.output 错误事件流中，turn 以 failed 收口。
+    const allErrored = [...outputs.values()].every((o) => !o.ok);
+    reflections = allErrored ? reflections + 1 : 0;
+    if (reflections >= maxReflections) {
+      yield emit({
+        ...base,
+        t: "session.error",
+        error: envelope(
+          "reflection",
+          "EXEC_FAILED",
+          `reached ${maxReflections} consecutive tool failures; stopping without success`,
+          false,
+        ),
+      });
+      yield emit({ ...base, t: "turn.completed", status: "failed" });
+      return { status: "failed" };
     }
     if (signal.aborted) return yield* interruptedOutcome();
     round++;

@@ -1,0 +1,11 @@
+{
+  "id": "case-03-refactor-extract",
+  "fixture": "mini-ts",
+  "instruction": "src/util.ts 的 double 和 triple 有重复的加法逻辑。重构：新增一个 repeat(x, n) 辅助函数返回 x 重复相加 n 次，double 和 triple 改为调用它。导出 repeat。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "src/util.ts", "text": "repeat" },
+    { "kind": "file-contains", "path": "src/util.ts", "text": "export function double" },
+    { "kind": "ts-parses", "path": "src/util.ts" }
+  ]
+}

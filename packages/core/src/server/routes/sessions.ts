@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Db } from "../../db/client";
-import { sessions, workspaces } from "../../db/schema";
+import { sessions, usage, workspaces } from "../../db/schema";
 
 export function createSessionsRoute(deps: { db: Db; repoPath: string; arclightDir: string }) {
   const { db, repoPath, arclightDir } = deps;
@@ -46,6 +46,24 @@ export function createSessionsRoute(deps: { db: Db; repoPath: string; arclightDi
         status: row.status,
         epoch: row.epoch,
         lastEventSeq: row.lastEventSeq,
+      });
+    })
+    .get("/:id/usage", (c) => {
+      // 成本可观测（DoD #7）：session 累计 token + cost。展示用，不做 quota 强制。
+      const r = db
+        .select({
+          inputTokens: sql<number>`coalesce(sum(${usage.inputTokens}), 0)`,
+          outputTokens: sql<number>`coalesce(sum(${usage.outputTokens}), 0)`,
+          costUsdMicros: sql<number>`coalesce(sum(${usage.costUsdMicros}), 0)`,
+        })
+        .from(usage)
+        .where(eq(usage.sessionId, c.req.param("id")))
+        .get();
+      return c.json({
+        ok: true,
+        inputTokens: r?.inputTokens ?? 0,
+        outputTokens: r?.outputTokens ?? 0,
+        costUsdMicros: r?.costUsdMicros ?? 0,
       });
     });
 }

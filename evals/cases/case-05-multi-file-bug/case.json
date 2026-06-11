@@ -1,0 +1,12 @@
+{
+  "id": "case-05-multi-file-bug",
+  "fixture": "mini-ts",
+  "instruction": "在 src/util.ts 新增 quadruple(x) 返回 4 倍，并在 src/math.ts 新增 sumAll(...nums: number[]) 返回所有数之和。两个文件都要改。",
+  "timeoutMs": 120000,
+  "judges": [
+    { "kind": "file-contains", "path": "src/util.ts", "text": "quadruple" },
+    { "kind": "file-contains", "path": "src/math.ts", "text": "sumAll" },
+    { "kind": "ts-parses", "path": "src/util.ts" },
+    { "kind": "ts-parses", "path": "src/math.ts" }
+  ]
+}

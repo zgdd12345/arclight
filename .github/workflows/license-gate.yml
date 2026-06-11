@@ -1,0 +1,20 @@
+name: license-gate
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2"
+      - name: Install
+        run: bun install
+      - name: Scan for copyleft licenses
+        # 拦截 GPL/LGPL/AGPL/EUPL；MPL-2.0 须人工豁免（当前无）。
+        run: bun scripts/license-gate.ts

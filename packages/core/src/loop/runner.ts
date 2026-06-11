@@ -31,6 +31,15 @@ export type RunnerDeps = {
   effectiveWindow?: number; // 压缩触发窗口（测试压低）
   repoMap?: boolean; // 进 turn 前注入 RepoMap 上下文（弹性，缺省关）
   repoMapTokens?: number; // RepoMap token 预算（默认 1024）
+  usage?: {
+    record(a: {
+      sessionId: string;
+      turnId: string;
+      inputTokens: number;
+      outputTokens: number;
+    }): void;
+  };
+  maxReflections?: number;
   maxRetries?: number;
 };
 
@@ -166,6 +175,20 @@ export class AgentRunner {
       executeTool: this.deps.executeTool,
       signal: ac.signal,
       maxRetries: this.deps.maxRetries ?? 3,
+      ...(this.deps.maxReflections !== undefined
+        ? { maxReflections: this.deps.maxReflections }
+        : {}),
+      ...(this.deps.usage
+        ? {
+            onUsage: (u) =>
+              this.deps.usage?.record({
+                sessionId,
+                turnId,
+                inputTokens: u.inputTokens,
+                outputTokens: u.outputTokens,
+              }),
+          }
+        : {}),
       ...(sc
         ? {
             checkpoint: {

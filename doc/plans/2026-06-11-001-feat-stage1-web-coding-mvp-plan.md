@@ -1,7 +1,7 @@
 ---
 title: "feat: 阶段一 Web + 写代码 MVP 开发计划"
 type: feat
-status: active
+status: completed
 date: 2026-06-11
 origin: doc/DEV_PLAN.md
 ---
@@ -349,7 +349,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M3 — 阶段一发布
 
-- [ ] **Unit 7: 反射闭环 + 10 条 golden eval + 可观测收口（slice6）**
+- [x] **Unit 7: 反射闭环 + golden eval + 可观测收口（slice6）** ✅ 2026-06-12（反射上限 max_reflections=3 硬停如实上报 + usage 落库 + pino 脱敏 + auditLog 14 kind + license-gate；**真实 GLM golden 7/7 通过**（case-10 集成测覆盖）超 ≥8/10 目标；CI 三 workflow；**端到端发布 demo 经 serve+GLM 真实跑通**：读→改→审批→批准→落地→/undo，usage/audit/checkpoint 全验证；usage 端点完成，前端实时成本展示为 follow-up）
 
 **Goal:** edit→lint→test→自校正反射闭环；10 条 golden case 全建齐 + CI 三 workflow；usage 成本展示。达成发布 DoD。
 

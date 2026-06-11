@@ -27,14 +27,32 @@ export class ApprovalPolicy implements ApprovalSeam {
   constructor(
     private readonly db: Db,
     private readonly bus: EventBus,
-    opts: { ttlMs?: number; now?: () => number; pollMs?: number; dangerFullAccess?: boolean } = {},
+    opts: {
+      ttlMs?: number;
+      now?: () => number;
+      pollMs?: number;
+      dangerFullAccess?: boolean;
+      audit?: (
+        kind: "blacklist.hit" | "approval.asked" | "tool.denied",
+        detail: Record<string, unknown>,
+        sessionId?: string,
+      ) => void;
+    } = {},
   ) {
     this.service = new ApprovalService(db, opts.ttlMs, opts.now);
     this.pollMs = opts.pollMs ?? 200;
     this.dangerFullAccess = opts.dangerFullAccess ?? false;
+    this.audit = opts.audit;
   }
   private readonly pollMs: number;
   private readonly dangerFullAccess: boolean;
+  private readonly audit:
+    | ((
+        kind: "blacklist.hit" | "approval.asked" | "tool.denied",
+        detail: Record<string, unknown>,
+        sessionId?: string,
+      ) => void)
+    | undefined;
 
   /** interrupt 路径：把该 turn 下所有 pending 审批转 cancelled。
    *  注：waitForDecision 也会在 signal.aborted 时自行 cancel；此方法保证即便无活跃挂起者，
@@ -57,8 +75,19 @@ export class ApprovalPolicy implements ApprovalSeam {
 
     if (decision.kind === "auto-allow") return { decision: "allow" };
     if (decision.kind === "deny") {
+      // 黑名单/admin_only 拒绝 → 审计留痕（安全敏感）
+      this.audit?.(
+        "blacklist.hit",
+        { tool: tool.meta.name, reason: decision.reason },
+        ctx.sessionId,
+      );
       return { decision: "deny", reason: decision.reason, errorClass: "PERMISSION_DENIED" };
     }
+    this.audit?.(
+      "approval.asked",
+      { tool: tool.meta.name, action: decision.action, risk: decision.risk },
+      ctx.sessionId,
+    );
 
     // ── ask：落库 + emit permission.ask + 挂起 ──
     // 确保 tool_calls 行存在（approvals.toolCallId FK；slice2 loop 尚未持久化 tool_calls，

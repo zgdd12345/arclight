@@ -112,6 +112,10 @@ export type LoopDeps = {
   maxRetries: number;
   retryDelayMs?: (attempt: number) => number; // 测试注入 0
   readConcurrency?: number; // 默认 8
+  /** 反射闭环上限（DEV_PLAN §2.3 ④）：连续 N 轮工具全失败即如实上报停止，不无限自校正。默认 3。 */
+  maxReflections?: number;
+  /** usage 回传钩子（DEV_PLAN §3.4 可观测）：每轮 provider usage 落库 */
+  onUsage?: (u: { inputTokens: number; outputTokens: number }) => void;
   /** 写工具执行前后的检查点钩子（DEV_PLAN §2.3 ③）。写工具 = !isReadOnly。 */
   checkpoint?: {
     pre(toolName: string): Promise<void>;
