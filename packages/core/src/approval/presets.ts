@@ -10,33 +10,40 @@ export type RiskDecision =
   | { kind: "ask"; risk: "low" | "med" | "high"; cls: RiskClass; action: string }
   | { kind: "deny"; reason: string };
 
-// 黑名单（DEV_PLAN §5.2 DoD #4）：命中即永拒。匹配分词后的命令，避免子串误伤。
-const BLACKLIST_MATCHERS: { test: (tokens: string[], raw: string) => boolean; reason: string }[] = [
+// 黑名单（DEV_PLAN §5.2 DoD #4）：命中即永拒。matcher 收单个 shell 段（已按 ;|&&|\|\| 拆分），
+// 故 t[0] 看到的是该段的首命令——防 `true; sudo id` 类复合命令把危险命令藏在非首位。
+const BLACKLIST_MATCHERS: { test: (tokens: string[], seg: string) => boolean; reason: string }[] = [
   {
     reason: "sudo / 提权一律拒绝",
     test: (t) => t[0] === "sudo" || t[0] === "su" || t[0] === "doas",
   },
   {
-    // 仅拦裸根 "/"、家目录 ~ / $HOME、根级通配 /*；普通目录（build/ 等）放行交审批
+    // 仅拦裸根 "/"、家目录 ~ / $HOME、根级通配 /*；普通目录（build/ 等）放行交审批。
+    // rm 的 -r 与 -f 既匹配组合 flag（-rf）也匹配分开 flag（-r -f）。
     reason: "rm -rf 家目录 / 根 一律拒绝",
-    test: (t, raw) => {
-      if (!/\brm\b/.test(raw) || !/-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r/.test(raw)) return false;
-      // raw 兜底：~ 或 $HOME 起头的目标（shell-quote 可能吞掉 $HOME 展开）
-      if (/(^|\s)(~|\$HOME)(\/|\s|$)/.test(raw)) return true;
+    test: (t, seg) => {
+      if (t[0] !== "rm" && !/\brm\b/.test(seg)) return false;
+      const hasR =
+        t.some((tok) => /^-[a-zA-Z]*r/i.test(tok)) || /-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r/.test(seg);
+      const hasF =
+        t.some((tok) => /^-[a-zA-Z]*f/.test(tok)) || /-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r/.test(seg);
+      if (!hasR || !hasF) return false;
+      if (/(^|\s)(~|\$HOME)(\/|\s|$)/.test(seg)) return true; // ~ / $HOME 起头目标
       return t.some((tok) => tok === "/" || tok === "~" || tok === "$HOME" || tok === "/*");
     },
   },
   {
+    // ~/.ssh、/.ssh、$HOME/.ssh、以及相对 .ssh（cat .ssh/id_rsa）一律拒绝
     reason: "访问 SSH 私钥目录一律拒绝",
-    test: (_t, raw) => /(^|[^\w])(~\/\.ssh|\/\.ssh\b|\$HOME\/\.ssh)/.test(raw),
+    test: (_t, seg) => /(^|[^\w.])(~\/|\/|\$HOME\/)?\.ssh(\/|\b)/.test(seg),
   },
   {
     reason: "访问云/凭证目录一律拒绝",
-    test: (_t, raw) => /(~\/\.aws|~\/\.gnupg|~\/\.config\/gh)\b/.test(raw),
+    test: (_t, seg) => /(^|[^\w.])(~\/|\/|\$HOME\/)?\.(aws|gnupg)(\/|\b)|~\/\.config\/gh/.test(seg),
   },
   {
     reason: "挂载 docker socket 一律拒绝",
-    test: (_t, raw) => /docker\.sock|\/var\/run\/docker/.test(raw),
+    test: (_t, seg) => /docker\.sock|\/var\/run\/docker/.test(seg),
   },
   {
     reason: "ssh/scp 外联一律拒绝（凭证不在执行域）",
@@ -44,7 +51,7 @@ const BLACKLIST_MATCHERS: { test: (tokens: string[], raw: string) => boolean; re
   },
   {
     reason: "读取系统密钥串一律拒绝",
-    test: (_t, raw) => /\bsecurity\s+(find-|dump-)|keychain|\/etc\/shadow/.test(raw),
+    test: (_t, seg) => /\bsecurity\s+(find-|dump-)|keychain|\/etc\/shadow/.test(seg),
   },
 ];
 
@@ -59,10 +66,30 @@ export function bashTokens(command: string): string[] {
   }
 }
 
-export function checkBlacklist(command: string): { blocked: boolean; reason?: string } {
-  const tokens = bashTokens(command);
-  for (const m of BLACKLIST_MATCHERS) {
-    if (m.test(tokens, command)) return { blocked: true, reason: m.reason };
+/** 按 shell 控制符拆段（;|&&|\|\||\| 与换行）。过度拆分只会更安全（fail-closed），
+ *  引号内的分隔符虽可能误拆，但误拆产生的段不匹配黑名单即放行，不引入危险。 */
+function splitSegments(command: string): string[] {
+  return command
+    .split(/\s*(?:&&|\|\||;|\||\n)\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function checkBlacklist(command: string, depth = 0): { blocked: boolean; reason?: string } {
+  for (const seg of splitSegments(command)) {
+    const tokens = bashTokens(seg);
+    for (const m of BLACKLIST_MATCHERS) {
+      if (m.test(tokens, seg)) return { blocked: true, reason: m.reason };
+    }
+    // 递归进 sh/bash/zsh -c '<inner>'，防把危险命令藏进内层 shell（深度限 3 防爆栈）
+    if (depth < 3 && (tokens[0] === "sh" || tokens[0] === "bash" || tokens[0] === "zsh")) {
+      const ci = tokens.indexOf("-c");
+      const inner = ci >= 0 ? tokens[ci + 1] : undefined;
+      if (inner) {
+        const r = checkBlacklist(inner, depth + 1);
+        if (r.blocked) return r;
+      }
+    }
   }
   return { blocked: false };
 }

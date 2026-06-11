@@ -42,6 +42,7 @@ export class DockerFallbackSandbox implements SandboxService {
   }
 
   async run(req: SandboxRunRequest): Promise<SandboxRunResult> {
+    if (req.signal?.aborted) throw new DOMException("interrupted before spawn", "AbortError");
     const probe = await this.probe();
     if (!probe.available) throw new SandboxUnavailableError(this.backend, probe.detail);
 

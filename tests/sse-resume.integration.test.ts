@@ -220,6 +220,30 @@ describe("刷新不丢（snapshot bootstrap + 增量续接）", () => {
   });
 });
 
+describe("C2 输入校验（Codex 对抗式发现）", () => {
+  test("epoch=NaN/非整数 → 400，绝不静默跳过 epoch-jump", async () => {
+    await createSession("it9");
+    for (const bad of ["notanumber", "1.5", "-1"]) {
+      const res = await fetch(http.url(`/api/sessions/it9/events?afterSeq=0&epoch=${bad}`), {
+        headers: http.headers(),
+      });
+      expect(res.status, `epoch=${bad}`).toBe(400);
+      await res.body?.cancel();
+    }
+  });
+
+  test("afterSeq=NaN/负 → 400", async () => {
+    await createSession("it10");
+    for (const bad of ["NaN", "-3", "1.2"]) {
+      const res = await fetch(http.url(`/api/sessions/it10/events?afterSeq=${bad}`), {
+        headers: http.headers(),
+      });
+      expect(res.status, `afterSeq=${bad}`).toBe(400);
+      await res.body?.cancel();
+    }
+  });
+});
+
 describe("C1 防线", () => {
   test("STALE_EPOCH：baseEpoch 落后 → 409", async () => {
     await createSession("it7");

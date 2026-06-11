@@ -37,6 +37,17 @@ describe("黑名单（命中即永拒，不弹审批）", () => {
     ["cat ~/.aws/credentials", "凭证"],
     ["docker -H unix:///var/run/docker.sock ps", "docker"],
     ["security find-generic-password -s x", "密钥"],
+    // —— Codex 对抗式发现的旁路（修复后必须拒绝）——
+    ["true; sudo id", "复合命令藏 sudo"],
+    ["echo hi && sudo reboot", "&& 后 sudo"],
+    ["ls || ssh evil@host", "|| 后 ssh"],
+    ["cat foo | ssh host", "管道后 ssh"],
+    ["sh -c 'ssh host'", "sh -c 内层 ssh"],
+    ["bash -c 'sudo id'", "bash -c 内层 sudo"],
+    ["rm -r -f /", "分开 flag rm 根"],
+    ["rm -R -f ~", "分开 flag rm 家"],
+    ["cat .ssh/id_rsa", "相对 .ssh"],
+    ["cp .aws/credentials /tmp", "相对 .aws"],
   ])("拒绝: %s", (cmd) => {
     expect(checkBlacklist(cmd).blocked).toBe(true);
   });
@@ -46,8 +57,11 @@ describe("黑名单（命中即永拒，不弹审批）", () => {
     "npm test",
     "rm -rf build/",
     "rm -rf node_modules",
+    "rm -r -f build/", // 分开 flag 但目标是普通目录 → 放行
     "git status",
     "grep ssh README.md",
+    "echo 'a; b'", // 引号内分号误拆产生的段不匹配 → 放行
+    "cat assh.txt", // .ssh 子串但非路径 → 放行
   ])("放行: %s", (cmd) => {
     expect(checkBlacklist(cmd).blocked).toBe(false);
   });

@@ -31,6 +31,10 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
     if (!Number.isInteger(afterSeq) || afterSeq < 0) {
       return c.json({ ok: false, code: "VALIDATION", message: "afterSeq must be int >= 0" }, 400);
     }
+    // epoch 提供但非法（NaN/非整数/负）→ 400，绝不让 NaN<epoch=false 静默跳过 epoch-jump
+    if (reqEpoch !== undefined && (!Number.isInteger(reqEpoch) || reqEpoch < 0)) {
+      return c.json({ ok: false, code: "VALIDATION", message: "epoch must be int >= 0" }, 400);
+    }
 
     const snapshotUrl = `/api/sessions/${sessionId}/snapshot`;
     // ③ epoch-jump
@@ -63,17 +67,19 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
         wake?.();
       });
 
-      for (const e of replayEvents(db, sessionId, afterSeq)) {
-        await stream.write(formatSseFrame(e));
-        maxSent = e.seq;
-      }
-
-      const heartbeat = setInterval(() => {
-        queue.push(HEARTBEAT_FRAME);
-        wake?.();
-      }, heartbeatMs);
-
+      // 订阅之后的一切都进 try/finally——replay 阶段 stream.write 抛错也必 unsubscribe（防 listener 泄漏）
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
       try {
+        for (const e of replayEvents(db, sessionId, afterSeq)) {
+          await stream.write(formatSseFrame(e));
+          maxSent = e.seq;
+        }
+
+        heartbeat = setInterval(() => {
+          queue.push(HEARTBEAT_FRAME);
+          wake?.();
+        }, heartbeatMs);
+
         while (live) {
           while (queue.length > 0) {
             const frame = queue.shift();
@@ -94,7 +100,7 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
           wake = null;
         }
       } finally {
-        clearInterval(heartbeat);
+        if (heartbeat !== undefined) clearInterval(heartbeat);
         unsubscribe();
       }
     });

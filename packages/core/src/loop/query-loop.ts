@@ -236,6 +236,15 @@ async function executeBatch(
       });
       return;
     }
+    // 审批挂起期间可能被中断（TOCTOU）：批准返回后、执行前复查 signal——
+    // 防"批准→立即中断→命令仍启动"。沙箱 run 内另有 spawn 前预检（双保险）。
+    if (deps.signal.aborted) {
+      results.set(call.callId, {
+        ok: false,
+        envelope: makeToolError(call.name, "CANCELLED", "interrupted before execution", false),
+      });
+      return;
+    }
     // 写工具：执行前后检查点（pre 捕获改前态，post 捕获改后态，供 /undo /redo）
     const isWrite = !tool.meta.isReadOnly;
     if (isWrite && deps.checkpoint) await deps.checkpoint.pre(call.name);

@@ -491,4 +491,41 @@ describe("审批接缝（完整四终态状态机绑 Unit 4）", () => {
     const toolMsg = state.messages.find((m) => m.role === "tool");
     expect(toolMsg).toMatchObject({ isError: true }); // 回灌喂模型改方案
   });
+
+  test("TOCTOU（Codex 发现）：批准返回后、执行前被中断 → 工具不执行，CANCELLED 回灌", async () => {
+    const ac = new AbortController();
+    let executed = 0;
+    const executeTool: LoopDeps["executeTool"] = async () => {
+      executed++;
+      return { ok: true, preview: "should not run" };
+    };
+    // 审批在 check 内部"批准"，但同时触发中断（模拟用户批准后立即点中断）
+    const approvals: ApprovalSeam = {
+      check: async () => {
+        ac.abort();
+        return { decision: "allow" };
+      },
+    };
+    const provider = scriptedProvider([
+      {
+        result: {
+          text: "",
+          toolCalls: [{ callId: "c1", name: "echo", rawArgs: { text: "a" } }],
+          finishReason: "tool-calls",
+        },
+      },
+      { result: { text: "ok", toolCalls: [], finishReason: "stop" } },
+    ]);
+    const { events, outcome } = await drain(
+      makeState(),
+      makeDeps({ callProvider: provider, approvals, executeTool, signal: ac.signal }),
+    );
+    expect(executed).toBe(0); // 批准后中断 → 命令绝不启动
+    const out = events.find((e) => e.t === "tool.output") as Extract<
+      ArcEvent,
+      { t: "tool.output" }
+    >;
+    expect(out.error?.error_class).toBe("CANCELLED");
+    expect(outcome.status).toBe("interrupted");
+  });
 });
