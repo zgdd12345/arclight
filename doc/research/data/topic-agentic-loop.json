@@ -1,0 +1,247 @@
+{
+  "topic": "2025-2026 AI Agent 架构与 agentic loop 最新与最先进实践(agent harness、tool-calling 循环、planning/reflection、sub-agent 编排、context engineering、Anthropic/OpenAI/Google 工程范式)",
+  "summary": "2025-2026 的 AI Agent 工程已从\"框架之争\"收敛为一套相对稳定的工程共识,核心是把 agent 理解为\"在循环中自主调用工具的 LLM\"。\n\n一、核心循环(agentic loop)。三大实验室高度趋同于同一基本范式:gather context → take action → verify work → repeat(Anthropic),即一个 while-loop 反复交替\"LLM 调用 + 工具执行 + 环境反馈\"。OpenAI 在《A Practical Guide to Building Agents》中把它描述为\"内置 agent loop:模型调用工具、把结果回灌、持续到任务完成\"。关键经验:绝大多数生产 agent 的失败不是\"模型能力不足\",而是\"上下文失败\"——喂给模型的信息冗余、结构差或不相关。\n\n二、Context Engineering(上下文工程)成为头号工程。Cognition 在 2025 年中提出\"context engineering 已是 agent 工程师的第一要务\";Anthropic《Effective context engineering for AI agents》给出系统方法论:寻找\"能最大化目标产出概率的最小高信号 token 集\",并提出 system prompt 的\"right altitude\"(既不硬编码脆弱逻辑、也不空泛)、工具应自洽且功能不重叠、少量 canonical few-shot 示例、把 message history 当作需持续 curate 的动态上下文。长任务的四大支柱技术:compaction(逼近上限时摘要,先清理旧工具结果)、structured note-taking / 持久化 memory(把笔记写到上下文窗口之外)、sub-agent 上下文隔离(子代理用独立窗口,只回传 1000-2000 token 的浓缩摘要)、just-in-time retrieval(只持有轻量标识符如文件路径/查询,运行时按需加载)。\n\n三、Agent Harness(长任务支架)。Anthropic《Effective harnesses for long-running agents》(2025-11)针对\"跨多个上下文窗口、跑数小时到数天\"的任务:用 initializer agent(首次运行搭建 feature_list.json 200+ 粒度特性、git 仓库、claude-progress.txt)+ coding agent(逐 session 增量推进、保持干净可提交状态)的双/三代理支架;每个 session 的启动仪式是\"读 progress 文件→看 git log→跑端到端冒烟测试(Puppeteer MCP)→只挑一个未完成特性实现\"。核心洞见:模仿人类工程师,用文件系统 + git 历史在无记忆的新窗口间\"重建工作状态\"。\n\n四、planning/reflection 推理范式。四大模式稳定为 ReAct(推理-行动交替)、Reflexion(失败后生成文本化\"教训\"、HumanEval 91% pass@1)、Plan-and-Execute / Plan-and-Act(先整体规划再执行,强模型上与 ReAct 持平或略优)、Tree of Thoughts;2025 前沿趋势是 planner-centric 框架(强 planner + 强 executor 如 GPT-4o)在 StableToolBench 上刷新 SOTA。Manus 的实践:与其让模型频繁更新 todo.md(约 1/3 动作浪费在维护清单),不如用专门的 planner agent 调度 executor sub-agents。\n\n五、三大厂工程范式。Anthropic:Claude Agent SDK(复用 Claude Code 的 agent loop / 上下文管理,Python+TS),\"给 Claude 一台计算机\"——文件系统即上下文、优先 agentic search(grep/tail)再考虑 semantic search、subagents、compaction、MCP、三类 verify 反馈(rules/lint、visual screenshot、LLM-as-judge);并提供 memory tool。OpenAI:Agents SDK(2025-03,Swarm 的生产化继任),核心原语 Agents / Handoffs(以工具形式 transfer_to_xxx)/ Guardrails(input/output/tool)/ Sessions,默认走 Responses API;主张\"先单代理加工具,必要时才上多代理\",多代理分 manager 模式与 decentralized handoffs。Google:ADK(开源,Python/TS/Go/Java)默认多代理 + A2A 协议(2025-04,跨厂跨框架互操作)+ Agent Engine + Interactions API。\n\n六、互操作标准。MCP(Anthropic 2024-11)一年内成事实标准:2025-12 月 9700 万+ 月度 SDK 下载、1 万+ 生产中 server,OpenAI/Google/Microsoft/AWS 全面支持,并捐给 Linux Foundation 下的 Agentic AI Foundation。MCP 负责\"工具/数据接入层\",A2A 负责\"agent 间通信层\",二者互补。\n\n七、多代理之争(重要 caveat)。Cognition《Don't Build Multi-Agents》(2025-06)强烈反对随意拆多代理:子代理基于\"未事先建立、互相冲突的假设\"行动,导致系统极脆;主张单线程 + 独立压缩 LLM。Anthropic 与之形成\"Do — Carefully\"的对照:多代理对可并行、可隔离上下文的 read-heavy 研究型任务有效,但对需共享决策上下文的任务危险。共识:从单代理起步,只有当任务可清晰拆分且子任务间无需共享决策上下文时才上多代理。",
+  "sota_techniques": [
+    {
+      "name": "Gather → Act → Verify agentic loop(基础 agent 循环)",
+      "description": "把 agent 实现为 while-loop:反复交替 LLM 调用与工具执行,用环境反馈(测试、lint、截图、错误)闭环验证后再继续。Anthropic 与 OpenAI 在这一基本范式上完全一致;强调'用简单可组合的模式而非复杂框架'。",
+      "projects": "Anthropic Building Effective Agents;OpenAI Agents SDK 内置 agent loop",
+      "maturity": "成熟/行业共识",
+      "url": "https://www.anthropic.com/research/building-effective-agents"
+    },
+    {
+      "name": "Context Engineering(上下文工程方法论)",
+      "description": "寻找'最大化目标产出概率的最小高信号 token 集'。具体战术:system prompt 的 right-altitude(不硬编码也不空泛、用 XML/Markdown 分节)、工具自洽且功能不重叠、curate 少量 canonical few-shot、把 message history 当动态上下文持续裁剪。被 Cognition 称为'agent 工程师的第一要务'。",
+      "projects": "Anthropic engineering blog;Cognition;Manus",
+      "maturity": "成熟/前沿活跃",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+      "name": "Compaction(上下文压缩/摘要)",
+      "description": "逼近上下文上限时自动摘要历史,优先清理不再需要的旧工具结果,再在必要时摘要对话,保留架构决策、未解 bug、实现细节;核心是 recall 与 precision 的平衡。Claude Agent SDK 提供 /compact 自动压缩,OpenAI/Cognition 用独立压缩 LLM。",
+      "projects": "Claude Agent SDK compaction;Cognition compression LLM",
+      "maturity": "成熟/已产品化",
+      "url": "https://platform.claude.com/docs/en/agent-sdk/overview"
+    },
+    {
+      "name": "Structured note-taking & 持久化 Memory(上下文外记忆)",
+      "description": "把笔记/知识写到上下文窗口之外的文件目录,跨 session 持久,运行时按需读回——避免每轮都把全部状态塞进上下文。Claude memory tool 提供可 CRUD 的持久 memory 目录(可记录 codebase 模式、调试洞见、架构决策)。",
+      "projects": "Claude memory tool;claude-progress.txt 模式",
+      "maturity": "成熟/已产品化",
+      "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool"
+    },
+    {
+      "name": "Just-in-Time Context Retrieval(运行时按需加载)",
+      "description": "agent 只持有轻量标识符(文件路径、查询、链接),用工具在运行时动态加载真实数据,而非预先把全部数据塞入上下文;类比人类用外部组织系统而非死记全部语料。可与'前置检索'混合以兼顾速度。",
+      "projects": "Anthropic context engineering;Claude Code 文件系统 agentic search",
+      "maturity": "成熟/最佳实践",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+      "name": "Sub-agent 上下文隔离编排(orchestrator-worker)",
+      "description": "主代理高层协调,专职 sub-agent 用独立干净的上下文窗口处理聚焦子任务,只回传 1000-2000 token 的浓缩摘要,实现关注点分离 + 并行;Manus 用 planner agent 调度 executor sub-agents 以隔离上下文。",
+      "projects": "Claude Code subagents;OpenAI handoffs;Google ADK 多代理;Manus",
+      "maturity": "成熟/前沿活跃",
+      "url": "https://code.claude.com/docs/en/sub-agents"
+    },
+    {
+      "name": "Long-Running Agent Harness(长任务双/三代理支架)",
+      "description": "用 initializer agent 首次搭建 feature_list.json(200+ 粒度特性、仅改 passes 字段)、git 仓库、claude-progress.txt;coding agent 逐 session 增量推进;启动仪式=读 progress→看 git log→跑端到端冒烟测试→只做一个未完成特性。用文件系统+git 在无记忆新窗口间重建状态。",
+      "projects": "anthropics/claude-quickstarts autonomous-coding;anthropics/cwc-long-running-agents",
+      "maturity": "前沿/2025-11 新发布",
+      "url": "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents"
+    },
+    {
+      "name": "ReAct(Reason+Act 交替)",
+      "description": "不预先制定完整计划,而是'推理当前状态→行动→观察结果→再推理'交替进行,把推理轨迹显式写入上下文。是最广泛使用的基础推理范式,几乎所有工具调用 agent 的默认骨架。",
+      "projects": "LangGraph ReAct agent;几乎所有 agent 框架",
+      "maturity": "成熟/事实标准",
+      "url": "https://arxiv.org/abs/2210.03629"
+    },
+    {
+      "name": "Reflexion(自反思/失败后生成教训)",
+      "description": "在 ReAct 基础上加入自反思:每个 episode 后分析轨迹生成文本化'lesson'并带入下一次尝试;论文在 HumanEval 取得 91% pass@1,超过当时 GPT-4 的 80%。适合可重试、有明确成败信号的任务。",
+      "projects": "Reflexion(noahshinn/reflexion);evaluator-optimizer 工作流",
+      "maturity": "成熟/研究广泛验证",
+      "url": "https://arxiv.org/abs/2303.11366"
+    },
+    {
+      "name": "Plan-and-Execute / Plan-and-Act 与 planner-centric 框架",
+      "description": "先用一个规划步生成整体计划再执行;强模型(如 GPT-4o)上与 ReAct 持平或略优。2025 前沿是 planner-centric:强 planner + 强 executor 组合,在 StableToolBench 等工具调用基准刷新 SOTA。适合步骤多、依赖明确的复杂任务。",
+      "projects": "LangGraph plan-and-execute;Beyond ReAct planner-centric framework",
+      "maturity": "前沿/研究活跃",
+      "url": "https://arxiv.org/html/2511.10037v1"
+    },
+    {
+      "name": "Claude Agent SDK(Anthropic 工程范式)",
+      "description": "复用 Claude Code 的 agent loop 与上下文管理(Python+TS)。核心:'给 Claude 一台计算机'——文件系统即上下文、优先 agentic search(grep/tail)再 semantic search、subagents、自动 compaction、MCP 集成、三类 verify 反馈(rules/lint、visual screenshot、LLM-as-judge)。",
+      "projects": "Claude Agent SDK;Claude Code",
+      "maturity": "成熟/已产品化",
+      "url": "https://claude.com/blog/building-agents-with-the-claude-agent-sdk"
+    },
+    {
+      "name": "OpenAI Agents SDK(OpenAI 工程范式)",
+      "description": "Swarm 的生产化继任(2025-03)。原语:Agents、Handoffs(以 transfer_to_xxx 工具形式做单向委派)、Guardrails(input/output/tool 三类校验)、Sessions(working context 持久层);默认 Responses API。主张先单代理加工具,必要时才多代理(manager 模式或 decentralized handoffs)。",
+      "projects": "openai/openai-agents-python;openai/openai-agents-js",
+      "maturity": "成熟/已产品化",
+      "url": "https://openai.github.io/openai-agents-python/"
+    },
+    {
+      "name": "Google ADK + A2A(Google 工程范式)",
+      "description": "ADK 开源 agent 框架(Python/TS/Go/Java),默认把多代理当作首选部署模式,supervisor↔worker 通过 A2A 协议(2025-04)通信;A2A 支持跨厂跨框架互操作(可对接 Anthropic/自定义/第三方),不暴露内部 memory;配 Agent Engine、Interactions API、Vertex AI。",
+      "projects": "google/adk;A2A protocol;Vertex AI Agent Engine",
+      "maturity": "成熟/企业级",
+      "url": "https://adk.dev/"
+    },
+    {
+      "name": "Model Context Protocol(MCP,工具/数据接入标准)",
+      "description": "Anthropic 2024-11 开源,标准化 LLM 与外部工具/数据源连接。已成事实标准:2025-12 月 9700 万+ 月度 SDK 下载、1 万+ 生产 server,OpenAI/Google/MS/AWS 全面支持,捐给 Linux Foundation 下 Agentic AI Foundation。是接入层(与 A2A 通信层互补),不是 agent 框架。",
+      "projects": "modelcontextprotocol;MCP.so 目录;10000+ servers",
+      "maturity": "成熟/行业标准",
+      "url": "https://modelcontextprotocol.io/specification/2025-11-25"
+    },
+    {
+      "name": "Browser-use / 浏览器 Agent 基建(网页端落地)",
+      "description": "开源浏览器 agent 框架,WebVoyager 基准 586 任务上 89.1% 成功率;配套 Browserbase(serverless 浏览器基建,2025 估值 3 亿)、Firecrawl Browser Sandbox(一次性容器+Playwright)。是'全平台个人 agent'网页端自动化的主流落地路径。",
+      "projects": "browser-use/browser-use;Browserbase;Firecrawl;vercel-labs/agent-browser",
+      "maturity": "成熟/快速迭代",
+      "url": "https://github.com/browser-use/browser-use"
+    }
+  ],
+  "recommendations_for_user": [
+    "从单代理 + 工具循环起步,先把 gather→act→verify 的 while-loop 跑通,不要一上来就上多代理框架。Anthropic/OpenAI 双方都明确建议'先单代理加工具,只有当任务可清晰拆分、子任务间无需共享决策上下文时才上多代理'(参见 Cognition《Don't Build Multi-Agents》的反面教训)。",
+    "把 context engineering 当作头号工程投入,而非附带项。落地清单:system prompt 用 right-altitude(分节、给强启发而非硬编码)、工具集保持自洽且功能不重叠、用少量 canonical few-shot、把 message history 当动态上下文持续裁剪。多数 agent 的失败是上下文失败而非模型能力问题。",
+    "为'全平台个人 agent'采用一套统一的接入抽象:用 MCP 作为工具/数据接入层(邮件、日历、Drive、GitHub、Slack 等都有现成 server),用 A2A 作为未来跨 agent 通信层。这能让你的网页端、移动端、桌面端共享同一套工具定义,避免重复造轮子。本环境已挂载 Gmail / Google Calendar / Google Drive 等 MCP,可直接作为个人 agent 的工具底座验证。",
+    "网页端优先:把'对话/规划'放在你自有的 web 前端(React/Next.js),把'真实网页操作'交给成熟浏览器 agent 基建(browser-use 89.1% WebVoyager,或 Browserbase/Firecrawl 提供 serverless 隔离浏览器)。不要自己从零写浏览器控制层。",
+    "为长时/跨会话任务实现持久状态层,而不是依赖单个上下文窗口:借鉴 Anthropic harness——用一个 progress 文件(progress.md/json)记录已完成与待办、用版本化的任务清单(只改状态字段)、用 memory 目录沉淀长期知识、每次会话开场先'读 progress→看历史→跑冒烟测试→挑一个任务'。可直接参考 anthropics/claude-quickstarts 的 autonomous-coding 模板。",
+    "推理范式按任务选型:交互式/探索式工具任务用 ReAct;可重试且有明确成败信号(如代码、可校验输出)的任务加 Reflexion 自反思;步骤多、依赖明确的复杂任务用 Plan-and-Execute/planner-centric。不要对所有任务都套同一种。",
+    "把 verify 做成一等公民:为每个动作设计可程序化的反馈(测试、lint、schema 校验、截图视觉反馈、必要时 LLM-as-judge)。个人 agent 尤其要在'发邮件/改文件/付款'等副作用动作前加 guardrails(输入过滤、输出校验、敏感操作 human-in-the-loop 确认)。",
+    "用 sub-agent 隔离上下文而非堆叠:对'调研类、可并行、read-heavy'的子任务派发独立窗口的 sub-agent 并只回传 1000-2000 token 摘要;对'需共享决策上下文'的任务保持单线程。这是 Anthropic 'Do—Carefully' 与 Cognition 'Don't' 的交集。",
+    "建立 evals + 可观测性从第一天起:为每个 prompt/agent 角色版本化并加评测,集中 trace 工具调用与 agent 交互。可靠性来自'受控迭代'而非一次写对。",
+    "模型分层降本提质(契合你的工作流):central 综合/架构/对抗审查用最强模型,执行类中等任务用中档模型,读文档/抽列表等机械活用最便宜档——在 agent 编排里按 sub-agent 角色分配模型层级。"
+  ],
+  "sources": [
+    {
+      "title": "Building Effective AI Agents — Anthropic",
+      "url": "https://www.anthropic.com/research/building-effective-agents"
+    },
+    {
+      "title": "Effective context engineering for AI agents — Anthropic",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+      "title": "Effective harnesses for long-running agents — Anthropic (2025-11)",
+      "url": "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents"
+    },
+    {
+      "title": "Building agents with the Claude Agent SDK — Anthropic/Claude",
+      "url": "https://claude.com/blog/building-agents-with-the-claude-agent-sdk"
+    },
+    {
+      "title": "Writing effective tools for AI agents — Anthropic",
+      "url": "https://www.anthropic.com/engineering/writing-tools-for-agents"
+    },
+    {
+      "title": "Claude Agent SDK overview — Claude API Docs",
+      "url": "https://platform.claude.com/docs/en/agent-sdk/overview"
+    },
+    {
+      "title": "Create custom subagents — Claude Code Docs",
+      "url": "https://code.claude.com/docs/en/sub-agents"
+    },
+    {
+      "title": "Memory tool — Claude API Docs",
+      "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool"
+    },
+    {
+      "title": "anthropics/claude-quickstarts (autonomous-coding)",
+      "url": "https://github.com/anthropics/claude-quickstarts/tree/main/autonomous-coding"
+    },
+    {
+      "title": "anthropics/cwc-long-running-agents",
+      "url": "https://github.com/anthropics/cwc-long-running-agents"
+    },
+    {
+      "title": "A Practical Guide to Building Agents (PDF) — OpenAI",
+      "url": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+    },
+    {
+      "title": "OpenAI Agents SDK (Python) — docs",
+      "url": "https://openai.github.io/openai-agents-python/"
+    },
+    {
+      "title": "openai/openai-agents-python — GitHub",
+      "url": "https://github.com/openai/openai-agents-python"
+    },
+    {
+      "title": "Handoffs — OpenAI Agents SDK",
+      "url": "https://openai.github.io/openai-agents-python/handoffs/"
+    },
+    {
+      "title": "Guardrails — OpenAI Agents SDK",
+      "url": "https://openai.github.io/openai-agents-python/guardrails/"
+    },
+    {
+      "title": "openai/swarm (predecessor) — GitHub",
+      "url": "https://github.com/openai/swarm"
+    },
+    {
+      "title": "Agent Development Kit (ADK) — Google",
+      "url": "https://adk.dev/"
+    },
+    {
+      "title": "Developer's guide to multi-agent patterns in ADK — Google Developers Blog",
+      "url": "https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/"
+    },
+    {
+      "title": "Model Context Protocol Specification (2025-11-25)",
+      "url": "https://modelcontextprotocol.io/specification/2025-11-25"
+    },
+    {
+      "title": "One Year of MCP: November 2025 Spec Release — MCP Blog",
+      "url": "https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/"
+    },
+    {
+      "title": "Don't Build Multi-Agents — Cognition",
+      "url": "https://cognition.ai/blog/dont-build-multi-agents"
+    },
+    {
+      "title": "How and when to build multi-agent systems — LangChain",
+      "url": "https://blog.langchain.com/how-and-when-to-build-multi-agent-systems/"
+    },
+    {
+      "title": "Context Engineering in Manus — rlancemartin",
+      "url": "https://rlancemartin.github.io/2025/10/15/manus/"
+    },
+    {
+      "title": "Beyond ReAct: A Planner-Centric Framework (arXiv 2511.10037)",
+      "url": "https://arxiv.org/html/2511.10037v1"
+    },
+    {
+      "title": "Reflexion (arXiv 2303.11366)",
+      "url": "https://arxiv.org/abs/2303.11366"
+    },
+    {
+      "title": "ReAct (arXiv 2210.03629)",
+      "url": "https://arxiv.org/abs/2210.03629"
+    },
+    {
+      "title": "browser-use/browser-use — GitHub",
+      "url": "https://github.com/browser-use/browser-use"
+    },
+    {
+      "title": "steel-dev/awesome-web-agents — GitHub",
+      "url": "https://github.com/steel-dev/awesome-web-agents"
+    }
+  ],
+  "caveats": [
+    "多代理是把双刃剑:Cognition 实证发现多代理'极易失败'——子代理基于未事先建立、互相冲突的假设行动。不要为了'看起来高级'而拆多代理;默认单代理,只有任务可清晰隔离且无需共享决策上下文时才拆。",
+    "Compaction/压缩会丢信息:摘要历史能控制上下文,但需精心工程以免丢失关键的架构决策、未解 bug、依赖关系。recall 与 precision 难以兼得,务必加 evals 验证压缩后行为不退化。",
+    "上下文不是越多越好:工具结果可在 agent 处理用户请求前就吃掉 5 万+ token;bloated 工具集会让模型分不清该用哪个工具。要主动裁剪上下文、保持 3-5 个最常用工具常驻、10+ 工具时用动态发现。",
+    "本次 OpenAI《A Practical Guide to Building Agents》PDF 为二进制无法被解析器提取原文,其要点来自搜索摘要与 OpenAI 开发者文档转述,引用具体措辞前建议核对原 PDF。",
+    "部分高数字(MCP 9700 万月度下载、1 万+ 生产 server、Browserbase 3 亿估值、WebVoyager 89.1%)来自厂商博客/二手报道,作为趋势参考可靠,但写入正式材料前建议回原始一手来源二次核实。",
+    "版本演进快:OpenAI Agents SDK、Google ADK、A2A、MCP spec(已迭代到 2025-11-25)、Claude Agent SDK 均在快速迭代,API 原语与最佳实践可能在数月内变化;落地前请以各自最新官方文档为准。",
+    "个人全平台 agent 的真实副作用风险高(发邮件、改日历、动文件、支付):必须为敏感动作加 guardrails 与 human-in-the-loop 确认,并对凭据/OAuth token 做最小权限与隔离;浏览器 agent 还存在 prompt injection(恶意网页注入指令)风险,需做来源隔离与输出校验。",
+    "部分来源 URL(如 arxiv 2602.xxxxx / 2603.xxxxx、某些 2026 博客)对应较新或可能尚未稳定的条目,引用前建议确认可访问性与权威性;本报告已尽量以官方文档与知名仓库为一手来源。"
+  ]
+}

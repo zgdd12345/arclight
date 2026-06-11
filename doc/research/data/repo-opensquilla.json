@@ -1,0 +1,227 @@
+{
+  "repo": "opensquilla/opensquilla (本地路径 /Users/fsm/project/arclightagent/opensquilla)，v0.3.1，Apache-2.0",
+  "one_liner": "OpenSquilla：一个 token 效率优先的微内核 Python agent 运行时，本地 model router 把每一轮路由到\"能胜任的最便宜模型\"，CLI / Web UI / chat channels 三类入口共享同一个 turn loop。",
+  "positioning": "定位为\"省同样的预算、做更多的事\"的个人/多渠道 AI agent 运行时。核心卖点：SquillaRouter（本地 ONNX 难度分类器做分层路由）+ 工具结果压缩 + 持久会话/本地记忆 + MCP-native 工具 + 多 provider 抽象。所有表层（CLI/REPL/TUI、Web 控制台、9+ 聊天渠道、gateway RPC、自身 MCP server）都跑同一条 turn pipeline，工具分发/重试/审批/用量计费/决策日志在各端行为一致。与用户\"全平台个人 agent\"目标最贴合的是\"单一共享内核 + 多端薄表层\"分层，以及围绕 token 成本的大量工程。它覆盖写代码/写文章/调研/媒体生成/日常规划，但没有真正的 computer use（无浏览器/GUI 控制）。",
+  "primary_language": "Python 3.12+",
+  "stack": "Python 3.12；Starlette + uvicorn (ASGI gateway/Web UI)；Typer + Rich + prompt-toolkit + questionary (CLI/REPL/TUI)；Pydantic v2 + pydantic-settings；SQLModel + aiosqlite + sqlite-vec + yoyo-migrations；APScheduler + croniter；structlog；httpx + websockets；onnxruntime + tokenizers + lightgbm/scikit-learn (本地 SquillaRouter 推理，recommended profile)；tiktoken + jieba；可选 mcp SDK；文档/媒体栈 python-docx/pptx/openpyxl/pypdf/reportlab/pdfplumber/pillow/weasyprint；渠道 SDK lark-oapi/python-telegram-bot/dingtalk-stream/qq-botpy/matrix-nio。打包 hatchling；发布含 Docker/compose、Windows portable、Homebrew Formula、systemd/launchd service-units。",
+  "license": "Apache-2.0（根 LICENSE 与 pyproject 一致）；内置 tokenjuice 归约后端改编自上游 MIT 项目（plugins/tokenjuice/PROVENANCE.md + LICENSE.tokenjuice），第三方声明集中在 THIRD_PARTY_NOTICES.md。",
+  "architecture": {
+    "agent_loop": "engine/agent.py 的 Agent 是显式状态机（IDLE→THINKING→STREAMING→[TOOL_CALLING→THINKING…]→DONE，任何步可转 ERROR），核心循环 _turn_generator 是 async generator 逐事件 yield（TextDelta/Thinking/ToolUseStart/ToolResult/Done/Error 等）。每轮做：history 清洗(sanitize_session_messages→project_historical_tool_payloads→repair_tool_pairing→drop_reasoning→strip_historical_image_blocks→limit_turns)、KV-cache 前缀稳定化、provider 流式消费、工具并发执行(含 policy/key 锁)、按需 compaction/重试/fallback。外层 engine/runtime.py 的 TurnRunner 才是 turn 编排器，经 turn_runner/ 下 10 个 stage（input→agent_bootstrap→attachment→compaction_and_history→prompt_assembler→provider_and_tools→stream_consumer→turn_finalizer）串联，并跑 engine/steps/ 的 pipeline 步骤（meta_resolution、squilla_router、resolve_model、skills_filter、prompt_cache、inject_* 等）。",
+    "context_memory": "双层：会话内 compaction（session/compaction.py，把旧 transcript 摘要成结构化 summary，保留近端 tail，保留用户目标/状态/改动文件/失败/下一步）与持久 memory（memory/ 子系统）解耦。记忆用 LongTermMemoryStore（memory/store.py，sqlite-vec 向量 + FTS/BM25 词法 + jieba 分词，混合检索 retrieval/fusion.py）。turn_capture/flush/session_flush 把对话事实落盘；'Dream'（memory/dream/，cron 定时、证据门控的记忆巩固/晋升，带 receipts/quarantine/ranking）做离线整理。大工具结果落 ToolResultStore（engine/tool_result_store.py，磁盘原文+预算+保留期），只把压缩投影发给模型，原文可回取。",
+    "tool_system": "@tool 装饰器 + ToolRegistry(tools/registry.py)，dispatch.py 的 build_tool_handler 是唯一入口：注入守卫→非可执行参数检查→预算/并发策略→在 current_tool_context 内分发→失败统一封装成 envelope.py 的 5 键 JSON（status/tool/error_class/user_message/retry_allowed，绝不泄露 traceback）。可见性按 ToolProfile/CallerKind 过滤；21 个 builtin（filesystem/shell/code_exec/git/patch/web/web_fetch/file_authoring/media/artifacts/memory_tools/messaging/sessions/skill_tools/meta_tools/router_control/admin 等）。工具结果经 tokenjuice 规则归约 + tool-result 投影做 token 压缩。",
+    "provider_abstraction": "provider/ 以 LLMProvider Protocol(protocol.py) + ProviderConfig/SelectorConfig(selector.py) 抽象；后端 anthropic/openai/openai_responses/ollama，通过 registry.py spec 映射 20+ 兼容厂商（OpenRouter/DeepSeek/Gemini/DashScope/MiniMax/Azure/vLLM 等）。selector 内置有序 fallback 链(resolve_failover_chain)，selector_fallback、smart_routing 拒答门、model_catalog/pricing/context_capabilities/credentials/request_proof 配套。换 provider 不改代码或 config schema。",
+    "execution_sandbox": "sandbox/ 三段式治理：policy.select_level(纯函数规则表 action_kind→SecurityLevel)→build_policy(mounts/network/资源caps/审批flag)→backend 执行。backend 按宿主选择：Linux bubblewrap(tmpfs 根+只读系统挂载+cap-drop ALL+unshare-net+new-session)、macOS seatbelt(sandbox-exec SBPL deny-by-default)、noop。integration.py 提供 sandboxed 装饰器把 governance gate(ApprovalGate/DenialLedger)接到工具；code_exec 还用正则拦 os.remove 等破坏性 Python 强制走审批。",
+    "ui_surface_layers": "三类表层共享内核：(1) gateway(Starlette ASGI)——/control Web UI、/ws WebSocket、/api/* 与 rpc_*（30+ RPC 模块：chat/sessions/approvals/memory/cron/skills/config/secrets/onboarding/wizard…）；(2) CLI 三套终端：cli/chat(直跑)、cli/repl(prompt-toolkit)、cli/tui，经 gateway_runtime/standalone_runtime 复用 runtime；(3) channels/ 9+ 聊天渠道(slack/discord/feishu/dingtalk/wecom/qq/telegram/matrix/msteams/terminal/websocket)统一 contract。还可反向作为 MCP server 暴露。",
+    "extensibility_plugins": "多条扩展轴：(a) Skill（SKILL.md frontmatter，skills/loader.py 多层加载 + injector.py 注入系统提示，60+ bundled skills）；(b) Meta-Skill（skills/meta/，SKILL.md composition 块编排固定工作流，拓扑序跑一次性 sub-Agent，失败回退普通轮）；(c) MCP-native 工具(mcp/ stdio+sse 客户端，discovery.py 把外部 MCP 工具注册进 ToolRegistry)；(d) ProviderPlugin 协议扩展厂商；(e) channel adapter 契约(channels/contract.py)；(f) tokenjuice 规则(JSON，按命令类目)；(g) plugins/(tokenjuice 内置)。",
+    "multi_agent": "engine/subagent.py 的 SubagentManager/SubagentRegistry/SubagentSpec 支持派生一次性 sub-Agent；session 可 branch/cascade-kill 形成会话树(session_key 含 :subagent: 标记，router 对子会话跳过路由)。agents/ 有 registry/scope/limits 管理多 agent profile。Meta-Skill 编排器(MetaOrchestrator)用拓扑序 sub-Agent 串多步；gateway 有 subagent_announce/agent_tasks 做任务编排与播报。属于'编排式子代理'而非对等多智能体协商。",
+    "session_persistence": "durable sessions 是核心卖点。session/ + persistence/：SessionStorage(aiosqlite) 存会话节点/transcript/summary/agent_tasks，乐观锁 epoch(StaleEpochError) 防并发覆盖，schema 经 yoyo migrations(V001–V010+，含 scheduler/heartbeat/agent_tasks/meta_skill_runs)。SessionManager 管 create/branch/resume/finish/kill/cascade、记忆 checkpoint、canonical transcript、cost_rollup。transcript/summary/compaction/artifacts/cost/replay 全持久化可回放(cli replay)。",
+    "permission_security": "分层安全：safety/tool_tiers.py 三档 RiskTier(SAFE 自动 / CONFIRM 阻塞等 ACK / ADMIN_ONLY 需 operator)，默认 fail-closed 给未声明工具 CONFIRM，shell/file_write/git_push/channel_send_as_admin 强制 ADMIN_ONLY；safety/permission_matrix.py 按渠道(webui 全开 / dm,group 仅 SAFE+CONFIRM，未知渠道当 dm 处理)+ 可注册 channel override；injection_guard 防提示注入；tools/ssrf.py + path_policy/path_aliases 防 SSRF 与越权路径；审批经 gateway approval_queue + application/approval_queue。gateway 有 auth/scopes/rate-limit/security-headers 中间件。",
+    "prompt_engineering": "identity/prompt.py 用 Jinja2(StrictUndefined)按 AgentProfile 组装系统提示(注入 tools/skills/memory/timezone/runtime_info/owner/heartbeat 提示)。SquillaRouter 还产出 prompt_policy(P0 压缩/P1 标准/P2 完整)与 thinking_mode(T0–T3)，P0 用单括号 [RESPONSE_POLICY: …] 末尾追加(利用 recency bias，按中英文选本地化 hint)。prompt_cache 步骤稳定 KV-cache 前缀：本轮 skills 上下文一次性落进 history 永久保留，只有 runtime 时间戳保持瞬态，避免缓存前缀失效。"
+  },
+  "capability_coverage": {
+    "code": "强。filesystem/shell/code_exec(沙箱 Python)/git/patch(apply_patch)/file_authoring 工具齐全，sandbox 隔离 + 审批门，stack-trace-*-probe(py/js/go/rust/generic)、git-diff、github、tmux 等 bundled skill。但偏'命令式工具执行'，无 IDE/LSP 级语义编辑。",
+    "writing": "强。paper-* 系列 skill 覆盖论文全流程(outline/section/abstract/citation/refbib/experiment/plot/revision/source-curator/preference-planner)，meta-paper-write 编排成稿；docx/pptx/xlsx/pdf/latex/html-to-pdf 文档生成，summarize/text-file-read 辅助。",
+    "research": "强。内置 web_search(brave/duckduckgo provider)+web_fetch(readability 抽正文)+http-fetch/multi-search-engine skill；deep-research、meta-web-research-to-report、meta-competitive-intel 编排调研→报告；记忆系统支撑长期事实积累。",
+    "computer_use": "弱/缺失。无浏览器自动化(playwright/selenium)、无屏幕/键鼠控制(pyautogui/xdotool)、无 GUI 截图理解；media 工具是图像/语音/视频'生成'(image_generate/voice_clone/voice_convert/seedance/nano-banana 等)而非'控制电脑'。这是与用户目标差距最大的一块，需自建浏览器/桌面控制工具或接 computer-use MCP。",
+    "planning": "中强(偏自动化运维)。scheduler/(APScheduler+croniter cron 调度、heartbeat 事件合并/优先级带/活跃时段掩码、reaper/stagger/delivery)+ cron CLI + meta-daily-operator-brief/meta-job-search-pipeline/meta-kid-project-planner 等编排型规划 skill；Dream 定时巩固记忆。偏'定时任务+工作流编排'，缺显式日历/待办/长期目标分解的结构化规划层。"
+  },
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/engine/agent.py",
+      "role": "Agent 显式状态机核心；_turn_generator 是逐事件 async-generator 主循环，含 history 清洗、工具并发、compaction/重试/fallback、KV-cache 前缀稳定化(257KB，最大单文件)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/engine/runtime.py",
+      "role": "TurnRunner——turn 编排器，所有入口收敛到 TurnRunner.run；含 tokenjuice 投影、tool-result 压缩、savings 计算、provider selector fallback(237KB)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/engine/turn_runner/harness.py",
+      "role": "turn 的 10 个有序 stage 的 Protocol 适配器与编排骨架(input→bootstrap→attachment→compaction→prompt_assembler→provider_and_tools→stream_consumer→finalizer)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/engine/steps/squilla_router.py",
+      "role": "路由 pipeline 步骤：tier 分类 + 置信门 + KV-cache anti-downgrade + 抱怨升级(中英文 200+ 词表) + 大上下文 floor + 图像路由 + thinking/prompt 控制器协调"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/squilla_router/v4_phase3.py",
+      "role": "本地 ONNX 路由模型 V4 Phase3 适配器：历史感知分类，把消息映射到 route_class→tier，输出 thinking_mode/prompt_policy/difficulty/margin/probabilities"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/squilla_router/controller.py",
+      "role": "纯函数后处理：由概率向量推导 thinking_mode(T0–T3)/prompt_policy(P0–P2)、难度/margin、禁止 T2/T3+P0 矛盾组合、中英文 hint 本地化"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/tools/dispatch.py",
+      "role": "工具分发唯一入口 build_tool_handler：注入守卫/参数检查/预算并发策略/context 注入/统一失败封装"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/tools/registry.py",
+      "role": "@tool 装饰器 + ToolRegistry + 按 ToolProfile/CallerKind 可见性过滤"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/tools/envelope.py",
+      "role": "工具失败统一 5 键 JSON 封装(绝不泄露 traceback)——值得照搬的稳定错误契约"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/engine/tool_result_store.py",
+      "role": "大工具结果落盘(原文+预算+保留期)，只把压缩投影发模型、原文可回取——token 效率关键件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/plugins/tokenjuice/reducer.py",
+      "role": "规则驱动(JSON 按命令类目)的工具输出归约后端——token 压缩可插拔机制"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/provider/selector.py",
+      "role": "provider 选择 + 有序 fallback 链 + spec 驱动的 20+ 厂商实例化"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/provider/protocol.py",
+      "role": "LLMProvider Protocol + ProviderPlugin 扩展契约 + 元数据/连接配置抽象"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/gateway/app.py",
+      "role": "Starlette ASGI 工厂：注入全部子系统单例，挂 /control Web UI、/ws、/api 与 rpc 分发器"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/channels/manager.py",
+      "role": "ChannelManager：统一启动/重试/健康检查/会话键构造/投递目标解析，把 9+ 渠道收敛进内核"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/channels/contract.py",
+      "role": "渠道适配器共享契约(capability tier + DM 安全姿态 + 错误分类)——新增渠道的统一不变量"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/mcp/discovery.py",
+      "role": "把外部 MCP server 工具发现并注册进 ToolRegistry，客户端按 owner 生命周期管理(stdio/sse)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/mcp_server/server.py",
+      "role": "FastMCP 工厂：把 OpenSquilla 会话工作流反向暴露为 MCP server 供别的 agent 调用"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/memory/store.py",
+      "role": "LongTermMemoryStore：sqlite-vec 向量 + FTS/BM25 词法 + jieba 分词的混合本地记忆检索"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/memory/dream/runner.py",
+      "role": "Dream：cron 定时、证据门控的离线记忆巩固/晋升(receipts/quarantine/ranking)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/session/manager.py",
+      "role": "SessionManager：create/branch/resume/finish/kill/cascade、记忆 checkpoint、canonical transcript、cost rollup"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/session/storage.py",
+      "role": "SessionStorage(aiosqlite)+乐观锁 epoch(StaleEpochError)+内联 schema 迁移——durable sessions 落地件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/session/compaction.py",
+      "role": "会话内 compaction：旧 transcript 摘要成结构化 summary，保留目标/状态/改动文件/失败/下一步"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/sandbox/integration.py",
+      "role": "沙箱运行时门面：configure_runtime/get_runtime/sandboxed 装饰器把 governance gate 接到工具"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/sandbox/policy.py",
+      "role": "纯函数 select_level/build_policy：action_kind→SecurityLevel→mounts/network/资源caps/审批flag"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/sandbox/backend/bubblewrap.py",
+      "role": "Linux bwrap 沙箱后端(tmpfs 根+只读系统挂载+cap-drop ALL+unshare-net+new-session)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/safety/tool_tiers.py",
+      "role": "RiskTier 三档(SAFE/CONFIRM/ADMIN_ONLY)+fail-closed 默认 CONFIRM+四类强制 ADMIN_ONLY 工具"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/safety/permission_matrix.py",
+      "role": "渠道→工具权限矩阵(webui 全开/dm,group 仅 SAFE+CONFIRM/未知当 dm)+per-channel override"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/scheduler/heartbeat.py",
+      "role": "心跳协调器：事件合并(coalesce 窗口)+优先级带冷却+活跃时段掩码，poll 驱动而非后台任务"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/scheduler/engine.py",
+      "role": "SchedulerEngine：cron 解析+下次运行计算+job 预约(防重复执行)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/skills/loader.py",
+      "role": "SKILL.md frontmatter 解析 + 多层 skill 加载 + SOP 编译(meta-skill composition)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/skills/meta/__init__.py",
+      "role": "Meta-Skill 编排：composition 块解析→拓扑序一次性 sub-Agent→失败回退普通轮，硬路径(pipeline)+软路径(meta_invoke 工具)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/identity/prompt.py",
+      "role": "Jinja2(StrictUndefined)系统提示组装：注入 tools/skills/memory/timezone/owner/heartbeat"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/src/opensquilla/cli/main.py",
+      "role": "Typer CLI 入口：先 load_env 再挂 20+ 子命令(channels/agents/config/cron/sessions/skills/migrate/sandbox/models/providers/mcp-server…)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/pyproject.toml",
+      "role": "依赖/可选 extra(core/recommended/mcp/memory/matrix/document-extras)/打包/入口脚本(opensquilla, gateway)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opensquilla/opensquilla.toml.example",
+      "role": "完整配置样例：provider/router/tiers/sandbox/channels/search 等运行时配置 schema"
+    }
+  ],
+  "standout_techniques": [
+    {
+      "name": "本地 model router 的分层路由 + 多重保护门(SquillaRouter)",
+      "what": "本地 ONNX/历史感知分类器把每轮分到 route_class→tier(c1/c2/c3…)，并产出 thinking_mode(T0–T3)与 prompt_policy(P0–P2)。叠加多重门：置信门(低于阈值回 default_tier)、KV-cache anti-downgrade(窗口内不降档以保缓存)、抱怨升级(检测'答非所问/重写/wrong'等 200+ 中英词表则升档)、大上下文 floor(material tokens 超阈值强制高 tier)、图像感知路由(跳过 ML 直选 vision tier)。决策全程本地，不把用户 prompt 发给外部分类器。",
+      "why_borrow": "个人 agent 长期成本主要在模型调用；'选最便宜可胜任模型'是直接省钱杠杆。其分层+保护门设计(尤其 anti-downgrade 保 KV-cache、抱怨升级救回低质答复、大上下文 floor)是可直接移植的成熟工程，且本地决策保隐私。"
+    },
+    {
+      "name": "工具结果两段式压缩(tokenjuice 规则归约 + tool-result 落盘投影)",
+      "what": "工具原始输出先经 tokenjuice 规则后端(按命令类目的 JSON 规则:strip-ansi/head-tail/dedupe/count-pattern)归约；超预算的大结果落 ToolResultStore(磁盘原文+预算+7天保留)，只把压缩投影发给模型，模型需要时可按 handle 回取原文。失败统一封装成 5 键 envelope(绝不泄露 traceback)。",
+      "why_borrow": "工具输出(shell/grep/构建日志/网页)是 context 爆炸主因。'原文落盘+投影上下文+可回取 handle' 既省 token 又不丢信息，是全平台 agent 必备的 token 效率基础设施；envelope 稳定错误契约让各端/各渠道错误展示一致且安全。"
+    },
+    {
+      "name": "单一共享内核 + 多端薄表层(TurnRunner/Agent 收敛)",
+      "what": "Web UI/HTTP/WebSocket(gateway rpc_*)、CLI 三套终端(chat/repl/tui)、9+ 聊天渠道(统一 contract)、甚至自身作为 MCP server，全部把请求收敛成同一个 TurnRunner.run + Agent 状态机，经统一 stage pipeline。表层只做 I/O 适配/流式渲染/审批 UI/slash 命令，零业务重复。",
+      "why_borrow": "正是用户'全平台(网页优先,兼顾 CLI/桌面/插件)'目标的标准答案：一份内核保证工具/记忆/审批/计费/路由在所有端行为一致，新增端=新增薄适配器。这是最该照搬的整体骨架。"
+    },
+    {
+      "name": "MCP 双向 native(客户端发现 + 自身作 MCP server)",
+      "what": "mcp/ 作为客户端(stdio + sse)发现外部 MCP server 工具并注册进同一 ToolRegistry(与 builtin 工具同等待遇、同走 dispatch/policy/沙箱/审批)；mcp_server/ 又用 FastMCP 把自己的会话工作流反向暴露为 MCP server 供别的 agent 调用。",
+      "why_borrow": "MCP-native 让生态工具即插即用，且'外部工具与内置工具同一安全/预算/审批管线'避免了旁路风险；双向暴露使 agent 既能用别人也能被别人用，是可扩展插件机制的现代基线。"
+    },
+    {
+      "name": "Meta-Skill 编排(固定工作流的一次性 sub-Agent 拓扑执行)",
+      "what": "SKILL.md 的 composition 块声明步骤与触发条件；meta_resolution 步骤匹配触发后由 MetaOrchestrator 按拓扑序跑一次性 sub-Agent 串多步，任一步失败则把 SKILL.md 正文注入回退为普通轮。提供硬路径(pipeline 拦截)与软路径(meta_invoke 工具供 LLM 主动调)。60+ bundled skill 含 meta-daily-operator-brief/job-search-pipeline/paper-write 等成品工作流。",
+      "why_borrow": "把'重复多步工作'固化为可复用 routine，是日常规划/写文章/调研三类能力的关键放大器；'失败回退普通轮'保证编排不脆。对个人 agent 的'每日简报/求职流水线/论文流水线'等高频场景极有价值。"
+    },
+    {
+      "name": "durable sessions + 乐观锁 + 回放 + Dream 记忆巩固",
+      "what": "会话/transcript/summary/artifacts/cost/replay 全持久化(aiosqlite + yoyo migrations)，乐观锁 epoch(StaleEpochError)防并发覆盖，支持 branch/resume/cascade-kill 会话树、cli replay 回放；记忆侧 LongTermMemoryStore 混合检索(向量+BM25+jieba)，Dream 用 cron 定时、证据门控做离线记忆晋升(带 receipts/quarantine 防污染)。",
+      "why_borrow": "个人 agent 需要长期、可恢复、可审计的会话与记忆；'乐观锁+迁移纪律+可回放'是生产级持久化的正确姿势，'证据门控的记忆巩固'比无脑写记忆更可靠。"
+    },
+    {
+      "name": "心跳协调器(事件合并 + 优先级带 + 活跃时段掩码)",
+      "what": "scheduler/heartbeat.py 把突发事件用 coalesce 窗口合并成少量 tick，按优先级带做冷却，活跃时段外不触发(缓冲保留待窗口重开)；poll 驱动而非常驻后台任务，便于测试与确定性。每个 tick 落 heartbeat_ticks 表(带 schema_version)。",
+      "why_borrow": "做'日常规划/主动提醒'的 agent 需要节流的主动行为，避免刷屏与夜间打扰；poll 驱动+优先级带+活跃时段是低成本可控的主动调度模式。"
+    },
+    {
+      "name": "渠道权限矩阵 + 工具风险分档(fail-closed)",
+      "what": "工具三档 RiskTier(SAFE 自动/CONFIRM 等审批/ADMIN_ONLY 需 operator)，未声明工具默认 CONFIRM(fail-closed)，shell/file_write/git_push/admin_send 强制 ADMIN_ONLY；再叠渠道矩阵(webui 全开，dm/group 仅 SAFE+CONFIRM，未知渠道当 dm)，可 per-channel override。配合 injection_guard/SSRF/path_policy。",
+      "why_borrow": "多渠道个人 agent 必须按'谁在哪个渠道'差异化授权——群聊不能跑 admin 工具。这套'工具分档×渠道矩阵×fail-closed'是直接可用的最小安全模型。"
+    }
+  ],
+  "cross_platform_approach": "\"单一共享内核 + 多端薄适配器\"是其全平台核心理念。内核是 engine：TurnRunner(runtime.py，分 10 stage 的 turn 编排)+ Agent(agent.py，显式状态机)。所有入口都把请求收敛成同一个 TurnRunner.run：(1) Web UI/HTTP/WebSocket 经 gateway(Starlette)→rpc_* 30+ 模块；(2) CLI 三套终端(cli/chat 直跑、cli/repl prompt-toolkit、cli/tui)经 gateway_runtime/standalone_runtime 复用同一 runtime；(3) 聊天渠道经 channels/manager.py 标准化为统一 contract(capability tier+DM 安全姿态+错误分类)再进内核；(4) 还能反向把自己暴露为 MCP server。表层只做 I/O 适配、流式渲染、审批 UI 与 slash 命令，业务零重复。跨 OS：sandbox backend 按宿主选(Linux bubblewrap / macOS seatbelt / noop)，安装覆盖 Windows portable(内置 CPython)/uv tool/源码，service-units 提供 systemd/launchd/windows。这套\"内核一份、表层多份、能力一致\"正是用户全平台目标最该照搬的骨架。注意:'桌面'目前仅是终端 TUI/portable 启动器，无原生 Electron/Tauri 桌面壳；'插件'主要靠 Skill/MetaSkill/MCP/ProviderPlugin/channel adapter 等扩展轴，而非传统插件市场。",
+  "weaknesses_avoid": [
+    "computer use 基本缺失：无浏览器自动化、无屏幕/键鼠控制、无 GUI 截图理解；media 工具是'生成'(图像/语音/视频)而非'控制电脑'。若目标含 computer use，需自建浏览器/桌面控制工具或接 computer-use MCP，不能指望从本仓直接获得。",
+    "巨型文件是维护与借鉴的最大障碍：engine/agent.py(257KB)与 runtime.py(237KB)单文件过大，逻辑高度耦合(turn_runner 与 runtime 还存在双向 import 循环，靠 lazy import 规避)；照搬时应按 stage/职责拆分，别复制这种体量。",
+    "路由强绑定本地 ONNX 资产(Git LFS + onnxruntime + Windows 需 VC++ 运行时)，部署脆弱、首启易 'DLL load failed'；虽有 fallback 到单模型直连，但'本地分类器'这条路在轻量/受限环境成本高，可考虑用更轻的启发式或远端小模型替代。",
+    "router 大量魔法常数与中文硬编码词表(抱怨检测 200+ 词、tier floor 阈值、anti-downgrade 窗口等)散落代码，可解释性与可调性差；借鉴时应外置为配置并做 A/B，而非照抄阈值。",
+    "深度绑定 SQLite(aiosqlite/sqlite-vec/FTS)——单机个人场景够用，但多用户/高并发/横向扩展会撞墙，乐观锁也只防覆盖不解决吞吐；若要做多租户服务端需替换持久层。",
+    "Apache-2.0 友好，但内置 tokenjuice 规则源自上游 MIT、媒体/渠道依赖众多(lark/telegram/dingtalk/qq/matrix 等)，二次分发需核对 THIRD_PARTY_NOTICES 与各 SDK 许可，避免合规疏漏。",
+    "'桌面端'与'网页优先 + 插件'相对单薄:桌面仅终端/portable，缺原生桌面壳;无浏览器扩展/IDE 插件形态。若用户要真正的桌面 App 与浏览器插件,需在此骨架外另起表层。",
+    "Development Status 仍是 3-Alpha、版本 0.3.1，API/schema 未稳定，bundled skill 偏媒体生成(短剧/配音/换声)等长尾，核心规划能力(日历/待办/目标分解)缺结构化层——借鉴架构思想可，直接生产依赖需谨慎。"
+  ]
+}

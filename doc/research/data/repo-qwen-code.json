@@ -1,0 +1,199 @@
+{
+  "repo": "https://github.com/QwenLM/qwen-code",
+  "one_liner": "Gemini CLI 的深度 fork，专为 Qwen 系列模型优化的开源终端 AI Agent，新增 Skills 机制、多协议 provider 抽象、auto-skill 自动技能提炼、Arena 多模型竞技、Channel 消息平台集成等核心差异化能力，并配套 Java/Python/TypeScript 多语言 SDK。",
+  "positioning": "相比上游 gemini-cli 以 Google Gemini API 为单一后端，qwen-code 重构为多 provider 统一的 OpenAI-compatible 抽象层，默认对接阿里云 DashScope/Qwen 系列模型，同时兼容 OpenRouter、DeepSeek、MiniMax、ModelScope 等。定位为\"代码 agent 核心框架\"而非单一产品：包含完整的 CLI、WebUI、VS Code/Zed 插件、消息平台 Channel（Telegram/微信/钉钉/飞书）、Java/Python 多语言 SDK，属于全平台 agent 基础设施。",
+  "primary_language": "TypeScript (Node.js 22+，ESM)；附带 Python SDK、Java SDK",
+  "stack": "TypeScript / React (Ink TUI) / esbuild 打包 / Vitest 测试 / @google/genai（内部转换层） / OpenAI SDK（provider pipeline） / MCP SDK / ACP (Agent Client Protocol) / chokidar 文件监听 / picomatch glob",
+  "license": "Apache-2.0",
+  "architecture": {
+    "agent_loop": "AgentCore（packages/core/src/agents/runtime/agent-core.ts）是无状态的推理-工具执行引擎，对外暴露 runLoop()。AgentHeadless（one-shot 任务）和 AgentInteractive（持久交互会话）通过组合 AgentCore 实现各自生命周期管理；GeminiChat（packages/core/src/core/geminiChat.ts）维护对话历史并与 ContentGenerator 流式通信；CoreToolScheduler（core/coreToolScheduler.ts）负责并发工具调度与结果聚合。",
+    "tool_system": "BaseDeclarativeTool + BaseToolInvocation 基类体系（packages/core/src/tools/tools.ts）；内置工具覆盖 shell、edit、read_file、write_file、glob、grep/ripgrep、ls、notebook_edit、web_fetch、lsp、computer_use（9 个子工具）、cron_create/delete/list、enter/exit_worktree、monitor、ask_user_question、send_message、task_stop、agent（子 agent 调度）、tool_search（延迟 schema 加载）；MCP 工具动态注册；ToolSearch 工具支持按关键字搜索延迟加载（deferred tool schema）。",
+    "context_memory": "双轨记忆：(1) GEMINI.md / QWEN.md 文件注入式上下文规则；(2) auto-memory 自动记忆系统（packages/core/src/memory/）— scheduleExtract 后台提取会话要点，scheduleDream 定期整合/去重，recall 按查询相关性向量召回（最多 5 条，每条 1200 字符），forget 删除过期记忆，全部异步后台执行不阻塞主 agent 循环；ChatCompressionService 实现三级阈值自动压缩（auto/warn/force），JSONL 格式持久化聊天历史。",
+    "provider_abstraction": "ContentGenerator 接口（packages/core/src/core/contentGenerator.ts）统一 generateContent / generateContentStream / countTokens；实现类：GeminiContentGenerator（@google/genai 原生）、OpenAIContentGenerator（pipeline + provider 插件体系，packages/core/src/core/openaiContentGenerator/）、AnthropicContentGenerator、QwenContentGenerator（OAuth 自动刷新 token + DashScope 路由）。provider 层有 dashscope、deepseek、minimax、mistral、openrouter、modelscope、mimo 等独立适配器；AuthType 枚举（openai/qwen-oauth/gemini/vertex-ai/anthropic）驱动 ContentGenerator 工厂选择；TaggedThinkingParser 解析 Qwen3/MiniMax 的 <think>…</thinking> 标签为 thought Part，实现推理过程可视化。",
+    "execution_sandbox": "Docker/Podman 容器沙箱（ghcr.io/qwenlm/qwen-code:{version}，通过 QWEN_SANDBOX 环境变量切换）；内置 ShellExecutionService + backgroundShellRegistry 管理后台 shell 进程；SleepInhibitor 防止 macOS 系统休眠干扰长任务；computer_use 工具通过 npx open-computer-use 二进制执行桌面操作（click/type/drag），首次使用触发权限引导流程。",
+    "extensibility_plugins": "三层扩展体系：(1) Skills（SKILL.md 文件，YAML frontmatter + Markdown 正文，四级作用域 bundled/extension/user/project）；(2) SubAgents（同格式，存于 .qwen/agents/）；(3) MCP Server（stdio/WebSocket 两种传输）。Channel 插件（packages/channels/）实现消息平台适配（Telegram/微信/钉钉/飞书），通过 AcpBridge + ChannelBase 抽象接入 agent 核心。Hook 系统（packages/core/src/hooks/）支持 command/http/prompt 三类 hook，可随 Skill 一同注册为会话级 hook。",
+    "multi_agent": "AgentTool（packages/core/src/tools/agent/agent.ts）是主 agent 调度子 agent 的工具；fork-subagent（fork-subagent.ts）利用 AsyncLocalStorage 追踪递归防止嵌套 fork；Arena（packages/core/src/agents/arena/ArenaManager.ts）实现多模型并行竞技（最多 5 个 agent，每个独立 git worktree，同一任务不同模型并发执行，自动摘要 diff 对比），适用于模型对比评测；builtin-agents 注册内置命名 agent（如 managed-skill-extractor）；subagent 对 EXCLUDED_TOOLS_FOR_SUBAGENTS 集合实施严格约束（禁用 cron/fork/task-stop 等控制面工具）。",
+    "session_persistence": "ChatRecordingService（packages/core/src/services/chatRecordingService.ts）以 JSONL 格式（chats/<sessionId>.jsonl）持久化每轮对话；SessionService 管理会话元数据；WorktreeSessionService 跟踪 git worktree 与会话的绑定关系；非交互模式（--resume）从 JSONL 恢复历史；auto-memory 存储在 .qwen/auto-memory/ 目录，按 type（user/feedback/project/reference）分主题文件。",
+    "permission_security": "PermissionManager（packages/core/src/permissions/permission-manager.ts）实现四级决策（allow/ask/deny/default）+规则优先级合并；规则语法支持 Bash(git *) 等 glob 带参数形式；shell-semantics 解析复合命令（管道/重定向）识别危险操作；dangerousRules 识别高风险 allow 规则并警告；auto-skill agent 拥有独立的 SkillScopedPermissionManager，仅允许在 .qwen/skills/ 内读写文件，防止越权访问（如 ~/.aws/credentials）；computer_use 每次动作均走标准 ask 流程，不存在 blanket 授权。",
+    "prompt_engineering": "getCoreSystemPrompt()（packages/core/src/core/prompts.ts）组装系统提示，包含工具列表、工作目录、环境信息；Skill 正文（SKILL.md）在调用时注入模型上下文；auto-memory 通过 recall 检索后追加到用户 memory 区段；PromptConfig 支持 systemPrompt（模板变量替换）和 renderedSystemPrompt（父会话缓存前缀直传，实现 prompt cache 复用）；QWEN_SYSTEM_PROMPT/QWEN_SYSTEM_MD 环境变量可覆盖系统提示；技能 model 字段支持为每个 skill 指定不同的子模型。",
+    "ui_surface_layers": "CLI（packages/cli/）基于 Ink（React for CLIs）构建 TUI；WebUI（packages/webui/）React + Vite + Tailwind CSS；VS Code IDE Companion（packages/vscode-ide-companion/）；Zed Extension（packages/zed-extension/）；消息 Channel（Telegram/微信/钉钉/飞书，packages/channels/）；HTTP daemon 模式（qwen serve，packages/cli/src/serve/）提供 ACP 协议 JSON API；非交互 CLI 模式（--prompt/-p）用于脚本集成。"
+  },
+  "capability_coverage": {
+    "code": "覆盖完善。shell 执行、文件读写编辑、git worktree 并发、LSP 代码补全/诊断、notebook_edit、ripgrep 代码搜索、Arena 多模型并发实现同一编程任务并对比 diff、bundled skills（new-app/review/simplify/batch）直接映射代码写作场景；Qwen3-Coder 模型专属优化。",
+    "writing": "部分覆盖。无专属写作 skill，但 SkillManager 支持用户自定义写作类 skill；web_fetch 可抓取参考资料；auto-memory 可存储写作风格偏好；WebUI 提供对话界面。需用户自行创建写作类 skill 或依赖 MCP。",
+    "research": "基础覆盖。web_fetch 工具支持抓取网页（含 GitHub raw URL 自动转换）；MCP 可接入外部搜索服务（Tavily key 有配置迁移记录）；批量 batch skill 可并行处理多文档；缺乏原生 web_search 工具，研究工作流需借助 MCP。",
+    "computer_use": "已实现但实验性。computer_use 工具组（click/type/drag/screenshot 等 9 个子工具）通过 open-computer-use 二进制代理执行桌面操作；macOS 需 Accessibility + Screen Recording 权限；Arena 的 tmux/iTerm2 backend 可驱动终端 UI；整体处于 beta 阶段，非核心场景。",
+    "planning": "中等覆盖。exitPlanMode 工具支持 plan → execute 两阶段模式；todoWrite 实现结构化任务清单；CronScheduler 实现定时 agent 任务（/loop skill）；SubAgent 系统支持分解复杂规划任务；Arena 可用于方案对比；缺乏专用日历/提醒集成，日常规划需通过 MCP 或 Channel 扩展。"
+  },
+  "cross_platform_approach": "Node.js 22+ 运行时实现跨平台（macOS/Linux/Windows）；CLI 层通过 esbuild 打包为单文件 dist/cli.js；Docker/Podman 沙箱提供隔离执行环境；消息 Channel 架构（ACP + ChannelBase）实现 agent 核心与平台适配器解耦；packages/webui 提供独立 Web 前端；VS Code/Zed 插件通过 IDE Companion 进程复用 CLI 核心；Java SDK 通过 ACP 协议调用 qwen --acp 子进程，实现 JVM 生态接入；Python SDK 同理；daemon 模式（qwen serve）对外暴露 HTTP/ACP 接口支持远程调用。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/agents/runtime/agent-core.ts",
+      "role": "Agent 主循环引擎，包含 EXCLUDED_TOOLS_FOR_SUBAGENTS 安全约束集合"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/agents/runtime/agent-headless.ts",
+      "role": "AgentHeadless：one-shot 子 agent 执行包装"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/core/geminiChat.ts",
+      "role": "对话历史管理 + 自动压缩 + 速率重试，系统核心"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/core/contentGenerator.ts",
+      "role": "ContentGenerator 接口定义 + AuthType 枚举，provider 抽象根"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/core/openaiContentGenerator/pipeline.ts",
+      "role": "OpenAI-compatible 请求 pipeline，支持流式 + 工具调用"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/core/openaiContentGenerator/taggedThinkingParser.ts",
+      "role": "解析 <think>/<thinking> 标签为 thought Part，适配 Qwen3/MiniMax 推理模型"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/core/openaiContentGenerator/provider/dashscope.ts",
+      "role": "DashScope 阿里云专属 provider 适配器"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/qwen/qwenContentGenerator.ts",
+      "role": "Qwen OAuth token 自动刷新 + DashScope 路由"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/providers/all-providers.ts",
+      "role": "Provider 注册表，列出所有内置 provider（含 alibaba/third-party 分组）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/providers/types.ts",
+      "role": "ProviderConfig 声明式接口定义"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/skills/skill-manager.ts",
+      "role": "Skill 生命周期管理：发现、解析、缓存、文件热监听"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/skills/skill-activation.ts",
+      "role": "路径感知的 Skill 延迟激活（conditional skills），减少上下文噪声"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/skills/types.ts",
+      "role": "SkillConfig 数据结构定义（allowedTools/hooks/model/paths 等字段）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/memory/manager.ts",
+      "role": "MemoryManager：auto-memory 统一入口（extract/dream/recall/forget）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/memory/skillReviewAgentPlanner.ts",
+      "role": "auto-skill 自动技能提炼：通过 managed-skill-extractor agent 分析会话并写入 SKILL.md"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/agents/arena/ArenaManager.ts",
+      "role": "Arena 多模型竞技编排器（最多 5 agent 并发，git worktree 隔离）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/tools/agent/agent.ts",
+      "role": "AgentTool：主 agent 调度子 agent 的工具实现"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/tools/agent/fork-subagent.ts",
+      "role": "Fork subagent：继承父会话历史的进程内分叉执行，AsyncLocalStorage 防递归"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/tools/tool-search.ts",
+      "role": "ToolSearch：延迟 schema 加载机制，减少初始上下文大小"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/tools/computer-use/tool.ts",
+      "role": "Computer Use 工具：open-computer-use 代理桌面操作"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/permissions/permission-manager.ts",
+      "role": "权限管理：allow/ask/deny/default 四级决策 + shell 语义分析"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/services/chatCompressionService.ts",
+      "role": "三级阈值自动压缩上下文窗口"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/services/chatRecordingService.ts",
+      "role": "JSONL 格式会话持久化"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/channels/base/src/ChannelBase.ts",
+      "role": "消息 Channel 基类（Telegram/微信/钉钉/飞书适配器共用）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/cli/src/gemini.tsx",
+      "role": "CLI 应用入口，初始化 Ink TUI 并启动 agent 会话"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/cli/src/serve/runQwenServe.ts",
+      "role": "HTTP daemon 模式入口（ACP 协议服务端）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/acp-bridge/src/channel.ts",
+      "role": "AcpChannel 接口定义（agent 进程通信契约）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/sdk-java/qwencode/src/main/java/com/alibaba/qwen/code/cli/QwenCodeCli.java",
+      "role": "Java SDK 入口，通过 ACP 调用 qwen CLI 子进程"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/qwen-code/packages/core/src/skills/bundled",
+      "role": "内置 Skill 目录：new-app/review/simplify/batch/loop/stuck/qc-helper"
+    }
+  ],
+  "standout_techniques": [
+    {
+      "name": "Skills 即 Markdown 文件（SKILL.md）",
+      "what": "每个 Skill 是一个目录，内含 YAML frontmatter（name/description/allowedTools/hooks/model/paths）+ Markdown 正文（即 prompt 内容）。支持 4 级作用域（bundled/extension/user/project），chokidar 热监听文件变更自动刷新，无需重启 agent。",
+      "why_borrow": "极低的 Skill 创作门槛：非开发者可通过文本编辑器扩展 agent 能力；SKILL.md 可纳入版本控制与项目一同分发；model 字段允许为不同 skill 指定不同子模型，实现功能-成本权衡。"
+    },
+    {
+      "name": "Conditional Skill Activation（路径感知延迟激活）",
+      "what": "Skill 的 paths 字段（glob 模式）定义激活条件；只有当 agent 实际接触到匹配路径的文件时，该 Skill 才出现在模型的工具列表中。SkillActivationRegistry 追踪已激活集合，未激活的 conditional skill 对模型不可见。",
+      "why_borrow": "大型 monorepo 中可能有数十个专项 Skill，全量注入会浪费上下文 token。按需激活可将模型的工具上下文控制在最小有效集合，同时不影响功能覆盖。"
+    },
+    {
+      "name": "auto-skill 自动技能提炼",
+      "what": "MemoryManager 在会话结束后触发 skillReviewAgentPlanner，启动 managed-skill-extractor 子 agent（AgentHeadless），分析本次会话中涌现的可复用模式，自动创建/更新 .qwen/skills/auto-skill-<name>/SKILL.md 文件（frontmatter 标记 source: auto-skill）。其权限被沙箱化 SkillScopedPermissionManager 严格限制在 .qwen/skills/ 目录内，防止越权读写。",
+      "why_borrow": "agent 使用越多，skill 库自动增长——实现了 agent 的自我进化。auto-skill 与手工 skill 并存（source 字段区分），用户可随时审阅/删除。这是一个开箱即用的元学习机制。"
+    },
+    {
+      "name": "ToolSearch 延迟 Schema 加载",
+      "what": "启动时只向模型暴露核心工具声明；MCP 工具和低频内置工具（computer_use、notebook_edit 等）设为 deferred，通过 ToolSearch 工具按关键字或 select:Name 精确查询后才将完整 schema 注入下一次 API 请求。",
+      "why_borrow": "直接解决「工具多 = system prompt 过长 = 上下文浪费」问题；模式可移植：任何 agent 框架都可以实现类似的工具懒加载注册表。"
+    },
+    {
+      "name": "Fork Subagent（AsyncLocalStorage 防递归）",
+      "what": "fork 子 agent 继承父会话的完整聊天历史（cache prefix 复用），通过 AsyncLocalStorage 标记 fork 执行帧，在子 agent 再次尝试调用 AgentTool（fork）时立刻拒绝，防止无限递归。fork 子 agent 保留相同的工具声明集合以实现字节对齐的 prompt cache 命中。",
+      "why_borrow": "cache prefix 复用可大幅降低并行子任务的 token 成本（父会话内容无需重新计费）；AsyncLocalStorage 防递归比历史扫描更可靠且零性能开销。"
+    },
+    {
+      "name": "Arena 多模型竞技（git worktree 隔离）",
+      "what": "ArenaManager 为每个参赛模型创建独立 git worktree，最多 5 个 agent 并发执行同一任务；完成后自动 summarizeUnifiedDiff 对比各模型产物，输出差异摘要供人工选择获胜者。",
+      "why_borrow": "可用于模型选型、prompt 对比实验、自动化 benchmark；git worktree 隔离保证各 agent 互不干扰；差异摘要比原始 diff 更利于非技术人员评判。"
+    },
+    {
+      "name": "TaggedThinkingParser（<think> 标签解析）",
+      "what": "流式解析 SSE 中的 <think>/<thinking> 标签，将推理过程（thought: true Part）与最终输出（text Part）分离，无需模型原生支持 thinking 字段，纯文本协议层实现。",
+      "why_borrow": "通用于任何在正文中以 XML 标签输出推理链的开源模型（DeepSeek-R1、Qwen3、MiniMax 等），无需 API 端支持即可获得结构化思维链。"
+    },
+    {
+      "name": "Channel 插件体系（消息平台适配）",
+      "what": "ChannelBase 抽象层（AcpBridge + SessionRouter + SenderGate + GroupGate）将 agent 核心与具体消息平台完全解耦；Telegram/微信/钉钉/飞书各自实现 adapter，BlockStreamer 处理流式输出的分块发送，PairingStore 管理用户-会话绑定。",
+      "why_borrow": "只需实现少量 adapter 方法即可将同一个 agent 接入任意 IM 平台；GroupGate 内置群聊过滤（防止 agent 响应所有群消息）；SenderGate 实现发送者白名单。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "强依赖 @google/genai 类型（GenerateContentParameters/Content/Part 等）作为内部通用数据格式，所有 provider adapter 都要转换成 Google 格式再转出，这不是真正中立的抽象——如果要接入 Anthropic 原生 streaming 或 OpenAI Responses API 的特殊字段，需要在 converter 层大量 hack。自建 agent 应定义自己的中性消息格式。",
+    "GeminiChat 是 upstream js-genai 库的手动 fork（文件头注释明确说明），长期维护成本高，上游 bugfix 需手动同步。",
+    "auto-memory 的 recall 评分采用简单的关键词 token 重叠（tokenize + includes），没有语义向量检索，在大量记忆条目场景下相关性较差。",
+    "Arena 多模型竞技场景下，每个 agent 的 git worktree 由框架自动创建但清理逻辑（worktreeCleanup.ts）依赖正常退出路径，异常崩溃可能留下孤儿 worktree 占用磁盘。",
+    "Skills 的 model 字段虽支持跨 provider 指定（authType:modelId 格式），但 skill 切换模型时权限管理、费用统计等与主会话是独立的，多 provider 混用场景的 token 预算管理无统一视图。",
+    "web_fetch 仅支持单 URL 抓取，缺乏原生 web_search 工具；研究/调研场景需用户自行接入 MCP（如 Tavily），门槛较高，配置文件中虽有 tavilyApiKey 的迁移记录但核心层无原生实现。",
+    "computer_use 功能依赖 npx open-computer-use 按需安装（~50MB），首次使用体验差；桌面自动化深度不足（无原生视觉识别，依赖第三方包）；在 headless/CI 场景会因缺少显示器而不可用。",
+    "Skills 内容是纯 Markdown prompt，无类型检查；YAML frontmatter 字段拼写错误会被静默忽略（仅在 parseErrors 中记录），调试体验差。"
+  ]
+}

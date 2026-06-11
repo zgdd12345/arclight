@@ -1,0 +1,189 @@
+{
+  "topic": "Agent 上下文工程与长期记忆 SOTA (2025–2026)：context compaction/condensation、记忆系统 (MemGPT/Letta/mem0/Zep)、RAG vs agentic search、知识图谱记忆、KV-cache 友好提示设计、超长上下文管理",
+  "summary": "2025–2026 年,\"上下文工程 (context engineering)\" 已被 Anthropic 等明确为\"构建 Agent 工程师的头号工作\",核心命题从\"写好 prompt\"转向\"在每一步把最合适的 token 配置进上下文窗口\"。主流共识与最新进展可归纳为五条主线：\n\n1) 上下文压缩/凝缩 (Compaction & Condensation)。当对话逼近上下文上限时,用高保真摘要保留架构决策、未决问题、关键约束,丢弃冗余工具输出。代表性研究 ACON (arXiv 2510.00615) 用\"自然语言空间的压缩准则优化\"在峰值 token 上减少 26–54% 而几乎不损性能;Cat (arXiv 2512.22087) 提出对历史的\"主动结构化凝缩\"以替代 append-only 被动压缩。Anthropic 官方将 compaction、结构化记笔记 (note-taking)、子 Agent 架构列为长程任务三大支柱。\n\n2) 记忆系统范式。MemGPT 把 LLM 当操作系统、分层管理 core/archival memory 的思想已演进为 Letta 的\"memory blocks\"+\"sleep-time agents\"(空闲时异步重组记忆)。mem0 (arXiv 2504.19413, ECAI 2025) 提供生产级可扩展记忆层,在 LoCoMo 上较 OpenAI memory 高 26% 准确率、低 91% 延迟、省 90% token;2026 版在时序推理 +29.6、multi-hop +23.1。Zep/Graphiti (arXiv 2501.13956) 用时序知识图谱在 DMR (94.8% vs 93.4%) 与 LongMemEval (+18.5% 准确率、-90% 延迟) 上领先。\n\n3) RAG vs Agentic Search。静态 RAG 正让位于\"Reasoning Agentic RAG\":Agent 把复杂问题分解为子查询、推理与检索交替进行 (ReAct、Self-RAG、Search-o1、Search-r1、GraphSearch)。研究反复显示 4K 上下文+检索常胜 16K 纯长上下文;最强栈是\"RAG 取回最相关 ~50K token,再让长上下文模型在其上细致推理\"。\n\n4) 知识图谱记忆。Zep 的分层图 (episodic/semantic/community 子图) 与 GraphRAG 的 community node 思路,使记忆具备时序保真与实体关系;但 mem0 2026 观察到趋势是\"从外部图数据库转向内置 entity linking 的混合多信号检索 (语义+BM25+实体)\",以降低部署开销。\n\n5) KV-cache 友好设计与超长上下文。Manus 总结的七条 (稳定前缀、append-only、mask 而非删工具、文件系统当上下文、recitation/todo 复述、保留错误证据、避免 few-shot 套路) 是生产 Agent 的事实标准;KV-cache 命中率是\"最重要的生产指标\"(缓存命中 10x 成本差)。同时\"百万 token 上下文是陷阱\":有效利用率在 100K 后降至 ~60%,中段信息存在 30%+ \"lost-in-the-middle\" 衰减,因此外部记忆/检索/子 Agent 隔离仍不可或缺。\n\n值得注意:Letta 的基准 (filesystem-is-all-you-need) 显示用 GPT-4o-mini + 基础文件工具 (grep/search/open) 在 LoCoMo 上达 74.0%,超过 mem0 图变体 68.5%,提示\"Agent 用工具的能力比检索机制本身更关键\"——简单、训练数据中常见的工具往往被用得更好。各云端记忆系统在 LoCoMo 上普遍聚集在 83–92%。",
+  "sota_techniques": [
+    {
+      "name": "Context Compaction (上下文压缩/摘要)",
+      "description": "在逼近上下文上限时,用高保真摘要凝缩历史:保留架构决策、未解决问题、关键约束与最近工具结果,丢弃冗余的旧工具输出。Anthropic 列为长程 Agent 三大支柱之一;Claude API 已内置 memory/compaction 能力。",
+      "projects": "Anthropic Claude (内置 compaction)、Claude Code、Cognition",
+      "maturity": "生产级 (Production)",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+      "name": "ACON — Agent Context Optimization",
+      "description": "统一的自适应上下文压缩框架,在自然语言空间优化'压缩准则':对'全上下文成功但压缩后失败'的配对轨迹做失败归因,据此更新压缩指南;峰值 token 降 26–54% 且基本保性能,还能把压缩能力蒸馏到小模型。",
+      "projects": "arXiv 2510.00615 (ACON)",
+      "maturity": "研究/论文 (Research)",
+      "url": "https://arxiv.org/abs/2510.00615"
+    },
+    {
+      "name": "Structured Note-Taking / Recitation (外部记笔记与复述)",
+      "description": "Agent 把进度、目标、todo 写入上下文窗口之外的持久文件并按需引用;周期性'复述' todo 把目标推回近端注意力,缓解 50+ 工具调用后的 lost-in-the-middle 漂移。",
+      "projects": "Anthropic context engineering、Manus、Claude Code (TODO)",
+      "maturity": "生产级 (Production)",
+      "url": "https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus"
+    },
+    {
+      "name": "Letta (formerly MemGPT) — Memory Blocks + Sleep-time Agents",
+      "description": "把 LLM 当 OS 做分层记忆 (core/conversational/archival/external files);memory blocks 把上下文切成可自编辑的功能单元 (Human/Persona);sleep-time agents 在空闲时异步重组记忆生成更高质量记忆块。新版可用 Claude Sonnet 4.5 的 memory 工具自管理记忆块。",
+      "projects": "github.com/letta-ai/letta (原 MemGPT)",
+      "maturity": "生产级开源 (Production OSS)",
+      "url": "https://www.letta.com/blog/memory-blocks"
+    },
+    {
+      "name": "Mem0 — 可扩展长期记忆层",
+      "description": "生产级开源记忆层,结构化 add/retrieve/update 操作,异步写入+重排序+元数据过滤+时间戳保真。LoCoMo 上较 OpenAI memory 高 26% 准确率、低 91% 延迟、省 90% token;2026 版时序推理 +29.6、multi-hop +23.1。支持 OpenAI/Claude/Gemini/Ollama。",
+      "projects": "github.com/mem0ai/mem0 (arXiv 2504.19413, ECAI 2025)",
+      "maturity": "生产级开源 (Production OSS)",
+      "url": "https://arxiv.org/abs/2504.19413"
+    },
+    {
+      "name": "Zep / Graphiti — 时序知识图谱记忆",
+      "description": "时序感知的知识图谱引擎,分层为 episodic/semantic/community 子图,动态融合非结构化对话与结构化业务数据并保留历史关系。DMR 94.8% (超 MemGPT 93.4%),LongMemEval 准确率 +18.5%、延迟 -90%。",
+      "projects": "github.com/getzep/graphiti、Zep (arXiv 2501.13956)",
+      "maturity": "生产级开源/商业 (Production)",
+      "url": "https://arxiv.org/abs/2501.13956"
+    },
+    {
+      "name": "Reasoning Agentic RAG / Agentic Search",
+      "description": "用推理驱动替代静态检索:Agent 分解子查询、推理与检索交替、按需触发检索 (内部知识不足才检索)。代表方法 ReAct、Self-RAG、PlanRAG、Search-o1、Search-r1、GraphSearch、HiPRAG。常胜纯长上下文。",
+      "projects": "Search-r1、Self-RAG、GraphSearch (arXiv 2509.22009)、Reasoning Agentic RAG 综述 (arXiv 2506.10408)",
+      "maturity": "研究→早期生产 (Research→Early prod)",
+      "url": "https://arxiv.org/pdf/2506.10408"
+    },
+    {
+      "name": "KV-cache 友好提示设计 (稳定前缀 + Mask 不删工具)",
+      "description": "保持 prompt 前缀逐 token 稳定 (勿放精确时间戳)、上下文 append-only、确定性序列化;工具集变更会失效整段 KV-cache,故用 logits masking/状态机约束动作而非动态增删工具。KV-cache 命中率是最重要的生产指标 (缓存命中 ~10x 成本差)。",
+      "projects": "Manus、vLLM (Automatic Prefix Caching)、Anthropic prompt caching",
+      "maturity": "生产级 (Production)",
+      "url": "https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus"
+    },
+    {
+      "name": "Filesystem-as-Memory (文件系统即上下文)",
+      "description": "把持久文件系统当作无限外部记忆,Agent 用 grep/search/open/close 等基础工具按需读写,避免不可逆压缩造成的信息损失。Letta 基准:GPT-4o-mini+基础文件工具在 LoCoMo 达 74.0%,超 mem0 图变体 68.5%——简单、训练常见的工具更易被用好。",
+      "projects": "Letta filesystem memory、Manus、Claude Code",
+      "maturity": "生产级 (Production)",
+      "url": "https://www.letta.com/blog/benchmarking-ai-agent-memory"
+    },
+    {
+      "name": "Sub-Agent / Context Isolation (子 Agent 上下文隔离)",
+      "description": "专职子 Agent 在干净上下文中做聚焦探索,只把 1–2K token 的凝缩摘要回传给主 Agent,隔离细节、防止子 Agent 间信息泄漏。read 类任务 (研究/分析) 易并行适合多 Agent;write 类 (编码) 因协调成本宜单 Agent。",
+      "projects": "Anthropic 多 Agent research、Cognition 'Don't build multi-agents'",
+      "maturity": "生产级 (Production)",
+      "url": "https://cognition.ai/blog/dont-build-multi-agents"
+    },
+    {
+      "name": "超长上下文 + 检索混合 (Long-context + RAG hybrid)",
+      "description": "百万 token 窗口是'陷阱':100K 后有效利用率降至 ~60%,中段 30%+ lost-in-the-middle 衰减。最强栈用 RAG 取回最相关 ~50K token,再让长上下文模型细致推理;对有界文档集可整体塞入跳过分块。",
+      "projects": "Microsoft Research 长上下文研究、Claude 1M context",
+      "maturity": "生产级 (Production)",
+      "url": "https://arxiv.org/pdf/2505.00675"
+    },
+    {
+      "name": "记忆评测基准 (LoCoMo / LongMemEval / BEAM)",
+      "description": "LoCoMo (多会话长对话 QA,单/多跳/时序);LongMemEval (ICLR 2025,~48 会话/题,~115K token);BEAM (1M/10M token 尺度)。是横向比较 mem0/Zep/Letta 的事实标准;云端系统普遍聚集 83–92%。",
+      "projects": "LongMemEval (ICLR 2025)、LoCoMo、BEAM、mem0 'State of Agent Memory 2026'",
+      "maturity": "基准/评测 (Benchmark)",
+      "url": "https://mem0.ai/blog/state-of-ai-agent-memory-2026"
+    }
+  ],
+  "recommendations_for_user": [
+    "记忆架构分三层落地：(1) Core/working memory — 用 Letta 式 memory blocks 存用户画像与 Agent persona,常驻上下文且可自编辑;(2) Archival/long-term — 接 mem0 或 Zep 作为持久记忆层,异步写入、按需检索;(3) Raw history — 落到文件系统/对象存储,用 grep/向量混合检索。网页端优先时,前两层放服务端 API,前端只持有轻量标识 (会话 id、文件路径) 按需拉取。",
+    "默认走单 Agent + 上下文工程,而非急于上多 Agent。先把 compaction(逼近窗口上限时高保真摘要)、结构化 note-taking/TODO 复述、错误证据保留这三件事做扎实;只有当任务是可并行的 read 密集型(检索/调研)时再引入子 Agent 隔离上下文。",
+    "把 KV-cache 命中率当作头号性能/成本指标。系统 prompt 与工具定义放最前且逐 token 稳定(切勿放精确到秒的时间戳);上下文严格 append-only;工具集用 logits-mask/状态机约束而非动态增删。配合 Anthropic prompt caching 或 vLLM Automatic Prefix Caching,可省下数量级的输入 token 成本(Manus 输入:输出约 100:1,成本几乎全在输入)。",
+    "检索策略选 agentic search 而非静态单次 RAG,但保留向量库做召回。让 Agent 能分解子查询、迭代检索、按需触发(内部知识够就不检索);最终把最相关 ~50K token 喂给长上下文模型推理。对有界文档集(单份合同/小代码库)可整体塞入跳过分块。",
+    "记忆系统选型给出明确建议：要最快上手且生产验证充分选 mem0(开源、多 LLM、benchmark 数据透明);要时序/实体关系强、需审计历史演化选 Zep/Graphiti(时序知识图谱);要 Agent 完全自管理记忆+sleep-time 异步整理选 Letta。三者都可先用 LoCoMo/LongMemEval 在你的真实数据上做 A/B 再定。",
+    "不要迷信百万 token 窗口替代记忆系统。100K 后有效利用率掉到 ~60%、中段信息严重 lost-in-the-middle,且全量上下文延迟与成本线性飙升。把长上下文当'推理工作台'而非'存储',真正的长期状态交给外部记忆层。",
+    "网页端优先的工程化：后端用支持 streaming + prompt caching 的 LLM(如 Claude/带 APC 的自托管 vLLM),记忆与压缩逻辑全在服务端,前端通过 SSE/WebSocket 增量渲染;把 memory blocks 的可视化(让用户查看/编辑 Agent 记住了什么)做成功能点,既提升信任也便于纠错。全平台一致性靠'服务端统一记忆 API + 各端瘦客户端'实现。",
+    "先建可观测与评测闭环再迭代记忆策略。接入 LoCoMo/LongMemEval 子集做回归,记录每轮 KV-cache 命中率、上下文 token 占用、检索召回与压缩前后性能差;Letta 基准提示'Agent 用工具的能力 > 检索机制本身',所以端到端任务基准(如 Terminal-Bench 思路)比孤立检索指标更能反映真实效果。"
+  ],
+  "caveats": [
+    "百万 token 上下文是陷阱:Microsoft Research 显示 100K 后有效利用率约 60%,中段信息 30%+ 衰减(lost-in-the-middle),长上下文不能替代外部记忆/检索。",
+    "压缩是有损且不可逆的:激进的 compaction/摘要会丢失后续才用得到的细节。优先 append-only + 文件系统外存(可回查),把摘要当索引而非唯一真相来源 (Manus 'avoid irreversible compression')。",
+    "KV-cache 极脆弱:前缀单 token 变动(时间戳、随机 id、JSON 键序不稳定)即让整段缓存失效;动态增删工具会使旧观测引用未定义工具,导致 schema 违例或幻觉动作——用 mask 不要删。",
+    "benchmark 数字需谨慎对比:LoCoMo 仅约 80–1540 题、各家用不同子集与 LLM,厂商自报常对自己有利(mem0 博客不提供 Zep/Letta 对照)。务必在你自己的数据与统一模型下复测,别直接搬营销数字。",
+    "图谱记忆有运维成本:Zep/GraphRAG 的实体抽取+图维护带来延迟、token 与基础设施开销;2026 趋势是转向'内置 entity linking 的混合检索'以降本,纯外部图库未必划算。",
+    "记忆会演化出风险:错误/过时事实会被写入并放大(staleness)、跨会话身份解析困难、隐私与同意架构缺失 (参见 SSGM 框架 arXiv 2603.11768);需做记忆校验、TTL/失效、用户可查可删。",
+    "few-shot 套路陷阱:统一格式的 action-observation 示例会让 Agent 陷入机械模仿、过度泛化,需在序列化中引入受控变化。",
+    "保留错误证据与安全的张力:把失败/堆栈留在上下文有助纠错,但也可能泄露敏感信息或污染后续推理,需做脱敏与边界控制。",
+    "部分来源日期标注为 2026 (如 arXiv 26xx 编号、mem0/dev.to 2026 基准),属环境给定的'当前为 2026-06'语境下的新近资料,引用时请按一手仓库/论文核对版本。"
+  ],
+  "sources": [
+    {
+      "title": "Anthropic — Effective context engineering for AI agents (官方)",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+      "title": "Manus — Context Engineering for AI Agents: Lessons from Building Manus",
+      "url": "https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus"
+    },
+    {
+      "title": "ACON: Optimizing Context Compression for Long-horizon LLM Agents (arXiv 2510.00615)",
+      "url": "https://arxiv.org/abs/2510.00615"
+    },
+    {
+      "title": "Context as a Tool: Context Management for Long-Horizon SWE-Agents (Cat, arXiv 2512.22087)",
+      "url": "https://arxiv.org/html/2512.22087v1"
+    },
+    {
+      "title": "Letta — Memory Blocks: The Key to Agentic Context Management",
+      "url": "https://www.letta.com/blog/memory-blocks"
+    },
+    {
+      "title": "Letta — Benchmarking AI Agent Memory: Is a Filesystem All You Need?",
+      "url": "https://www.letta.com/blog/benchmarking-ai-agent-memory"
+    },
+    {
+      "title": "Letta — Rearchitecting Letta's Agent Loop (ReAct, MemGPT & Claude Code)",
+      "url": "https://www.letta.com/blog/letta-v1-agent"
+    },
+    {
+      "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory (arXiv 2504.19413)",
+      "url": "https://arxiv.org/abs/2504.19413"
+    },
+    {
+      "title": "Mem0 — State of AI Agent Memory 2026: Benchmarks, Architectures & Production Gaps",
+      "url": "https://mem0.ai/blog/state-of-ai-agent-memory-2026"
+    },
+    {
+      "title": "Zep: A Temporal Knowledge Graph Architecture for Agent Memory (arXiv 2501.13956)",
+      "url": "https://arxiv.org/abs/2501.13956"
+    },
+    {
+      "title": "Reasoning RAG via System 1 or System 2: 综述 (Reasoning Agentic RAG, arXiv 2506.10408)",
+      "url": "https://arxiv.org/pdf/2506.10408"
+    },
+    {
+      "title": "GraphSearch: An Agentic Deep Searching Workflow for Graph RAG (arXiv 2509.22009)",
+      "url": "https://arxiv.org/pdf/2509.22009"
+    },
+    {
+      "title": "KV-Cache Aware Prompt Engineering — How Stable Prefixes Unlock 65% Latency Improvements",
+      "url": "https://ankitbko.github.io/blog/2025/08/prompt-engineering-kv-cache/"
+    },
+    {
+      "title": "Cognition — Don't Build Multi-Agents (HN 讨论)",
+      "url": "https://news.ycombinator.com/item?id=45096962"
+    },
+    {
+      "title": "Rethinking Memory in LLM based Agents: Representations, Operations, Emerging Topics (arXiv 2505.00675)",
+      "url": "https://arxiv.org/pdf/2505.00675"
+    },
+    {
+      "title": "A Survey of Context Engineering for Large Language Models (arXiv 2507.13334)",
+      "url": "https://arxiv.org/pdf/2507.13334"
+    },
+    {
+      "title": "Evaluating Memory in LLM Agents via Incremental Multi-Turn Interactions (LongMemEval 相关, arXiv 2507.05257)",
+      "url": "https://arxiv.org/html/2507.05257v3"
+    },
+    {
+      "title": "A Million Token Context Window Isn't What You Think It Is",
+      "url": "https://syntackle.com/blog/long-context-window-ai-model-catch/"
+    },
+    {
+      "title": "InfoWorld — Mem0: An open-source memory layer for LLM applications and AI agents",
+      "url": "https://www.infoworld.com/article/4026560/mem0-an-open-source-memory-layer-for-llm-applications-and-ai-agents.html"
+    }
+  ]
+}

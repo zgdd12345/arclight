@@ -1,0 +1,222 @@
+{
+  "topic": "MCP 生态与工具/技能标准 (Model Context Protocol 2025-2026 最新进展)",
+  "summary": "Model Context Protocol (MCP) 在 2025-2026 年完成了从 Anthropic 内部孵化到行业基础设施的跨越式演进。2024 年 11 月首版规范发布后，2025 年全年高速增长：SDK 月下载量达 9700 万次，公开 server 超 10,000 个，主流 AI 客户端（Claude、ChatGPT、VS Code Copilot、Cursor、Gemini CLI 等）全面内置支持。2025 年 12 月，Anthropic 将 MCP 捐赠给 Linux Foundation 旗下新成立的 Agentic AI Foundation (AAIF)，与 Block 的 goose、OpenAI 的 AGENTS.md 一起成为首批项目，Platinum 成员涵盖 AWS、Google、Microsoft、OpenAI，标志着 MCP 成为真正的 vendor-neutral 行业标准。2026 年 1 月，MCP Apps 作为首个官方扩展正式发布，让 server 可向 AI 对话中注入交互式 HTML UI；2026 年 7 月 28 日 Release Candidate 进一步引入无状态核心架构（消除 session 粘滞）、Extensions 正式治理框架、Tasks 扩展升级、JSON Schema 2020-12 支持及废弃政策。与此同时，Anthropic 在 2025 年 10 月推出 Agent Skills / SKILL.md 开放标准，已获 Claude Code、OpenAI Codex、Cursor、Gemini CLI 等 32 个工具采纳，成为跨平台 Agent 技能互操作的新基石。Google 的 A2A (Agent-to-Agent) 协议于 2025 年 4 月发布，2025 年 6 月捐赠 Linux Foundation，2026 年发布 v1.0.0，与 MCP 形成互补分层：MCP 负责 agent-to-tool，A2A 负责 agent-to-agent 协作委派。安全方面，MCP 规范已强制要求 OAuth 2.1 + PKCE + RFC 8707 Resource Indicators + RFC 9728 Protected Resource Metadata，但 tool poisoning / prompt injection（CVE-2025-54136 等）仍是突出威胁。整体生态已进入\"企业基础设施\"阶段，Registry 官方 API 收录近万条 server 记录，第三方目录（mcp.so、PulseMCP、Smithery）合计覆盖 13,000–19,000+ servers。",
+  "sota_techniques": [
+    {
+      "name": "MCP Core Specification 2025-11-05 / 2026-07-28 RC",
+      "description": "Model Context Protocol 核心规范，定义 Host / Client / Server 三角架构、JSON-RPC 2.0 数据层、Tools / Resources / Prompts 三大 server primitives、Sampling / Elicitation / Logging 三大 client primitives，以及 Streamable HTTP（SSE）和 STDIO 两种 transport。2026-07-28 RC 引入无状态核心（消除 initialize 握手 / Mcp-Session-Id）、Mcp-Method/Mcp-Name 路由 headers、结果 ttlMs/cacheScope、JSON Schema 2020-12、OAuth 2.0/OIDC 对齐，并正式废弃 Roots/Sampling/Logging（12 个月过渡期）。",
+      "maturity": "GA + RC（2026-07-28 最终版待发布）",
+      "projects": "modelcontextprotocol/modelcontextprotocol (GitHub), modelcontextprotocol.io",
+      "url": "https://modelcontextprotocol.io/specification/latest"
+    },
+    {
+      "name": "MCP Streamable HTTP Transport",
+      "description": "2025-03-26 规范引入的新 transport，用 HTTP POST 发送客户端消息、可选 Server-Sent Events 流式推送服务端消息，替代旧版 HTTP+SSE。支持远程部署、标准负载均衡器、Bearer token 认证。2026-07-28 RC 进一步实现无状态化，彻底解决水平扩缩容问题，是生产级远程 MCP server 的首选 transport。Spring AI、Vercel AI SDK、LangChain 等框架均已提供开箱即用的 Streamable HTTP starter。",
+      "maturity": "GA（已取代旧版 HTTP+SSE，成为远程 server 推荐标准）",
+      "projects": "modelcontextprotocol/python-sdk, modelcontextprotocol/typescript-sdk, spring-ai mcp-streamable-http-server-boot-starter",
+      "url": "https://modelcontextprotocol.io/docs/learn/architecture"
+    },
+    {
+      "name": "MCP Apps (官方扩展 SEP-1865)",
+      "description": "2026 年 1 月 26 日正式发布的首个 MCP 官方扩展。通过 ui:// URI scheme 让 MCP server 的 tool 返回可交互 HTML 界面（仪表盘、表单、数据可视化、多步骤工作流），直接嵌入 AI 对话中的沙盒 iframe 渲染。bidirectional 通信基于 MCP JSON-RPC base protocol，一次开发即可在 Claude、VS Code Copilot、Goose、Postman 等所有兼容客户端中运行。",
+      "maturity": "正式 GA（官方扩展，独立版本管理）",
+      "projects": "modelcontextprotocol/ext-apps (GitHub)",
+      "url": "https://github.com/modelcontextprotocol/ext-apps"
+    },
+    {
+      "name": "MCP Tasks (实验性扩展 → 正式扩展)",
+      "description": "为 MCP 请求提供持久执行包装（durable execution wrapper），支持长时间运行的异步操作（昂贵计算、工作流自动化、批处理、多步骤操作），通过 handle-based 生命周期 API（tasks/get、tasks/update、tasks/cancel）查询状态、重试失败、设定结果过期策略。2026-07-28 RC 中从实验性核心迁移为独立扩展，正式纳入 Extensions 治理框架。",
+      "maturity": "实验性 → 正式扩展（2026-07-28 RC）",
+      "projects": "modelcontextprotocol/modelcontextprotocol (SEP-1686)",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-mcp-roadmap/"
+    },
+    {
+      "name": "MCP Official Registry",
+      "description": "官方 MCP server 发现平台，API 地址 registry.modelcontextprotocol.io，2025 年 9 月 preview 上线，2025 年 10 月 API freeze v0.1。支持 GitHub OAuth、GitHub OIDC（CI/CD）、DNS/HTTP 域名验证等多种 namespace 所有权验证方式。2026 年 5 月 API 收录 9,652 条最新 server 记录（含历史版本 28,959 条）。技术栈：Go + PostgreSQL + Docker，Working Group 多厂商治理。",
+      "maturity": "Preview / v0.1 API Freeze（破坏性变更仍可能出现）",
+      "projects": "modelcontextprotocol/registry (GitHub)",
+      "url": "https://github.com/modelcontextprotocol/registry"
+    },
+    {
+      "name": "Agentic AI Foundation (AAIF) / Linux Foundation MCP 治理",
+      "description": "2025 年 12 月 Anthropic 将 MCP 捐赠给 Linux Foundation 旗下 AAIF，实现 vendor-neutral 社区治理。Platinum 成员：AWS、Anthropic、Block、Bloomberg、Cloudflare、Google、Microsoft、OpenAI。MCP 保留完全技术自主权，AAIF Governing Board 负责预算与成员事务。对企业采购/合规而言，消除了单厂商锁定风险，使 MCP 与 W3C/IETF 等标准机构同等可信。",
+      "maturity": "正式成立（2025-12）",
+      "projects": "Linux Foundation AAIF, MCP + goose + AGENTS.md 作为首批项目",
+      "url": "https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation"
+    },
+    {
+      "name": "Agent Skills / SKILL.md 开放标准",
+      "description": "Anthropic 于 2025 年 10 月 16 日推出 Agent Skills，同年 12 月 18 日在 agentskills.io 以开放标准形式发布。技能为目录形式，必须包含 YAML frontmatter（name/description）+ Markdown 正文的 SKILL.md 文件，支持捆绑可执行脚本和附属资源。Agent 启动时预加载元数据，按需加载全文，实现渐进式上下文管理。已被 32 个工具采纳（Claude Code、OpenAI Codex、Cursor、VS Code Copilot、Gemini CLI、JetBrains Junie、AWS Kiro、Block Goose 等），skills.sh 市场收录 89,753+ 个 skills。",
+      "maturity": "GA（正式开放标准，跨平台互操作）",
+      "projects": "agentskills/agentskills (GitHub), agentskills.io, anthropics/skills (GitHub)",
+      "url": "https://agentskills.io/specification"
+    },
+    {
+      "name": "A2A (Agent-to-Agent Protocol) v1.0.0",
+      "description": "Google 于 2025 年 4 月发布的 agent-to-agent 协作协议，使不同厂商 AI agent 能相互发现、委派任务、跨系统协调。技术栈：HTTPS + JSON-RPC 2.0 + Server-Sent Events，Agent Cards 用于能力广播。2025 年 6 月捐赠 Linux Foundation AAIF，2026 年发布 v1.0.0 正式版。已有 150+ 组织支持。与 MCP 互补分层：MCP 解决 agent-tool 连接，A2A 解决 agent-agent 协作委派（\"MCP 给 agent 工具，A2A 给 agent 同事\"）。IBM Agent Communication Protocol 已合并入 A2A。",
+      "maturity": "v1.0.0 正式版（2026）",
+      "projects": "google/A2A (GitHub), linux-foundation AAIF",
+      "url": "https://atlan.com/know/google-a2a-protocol/"
+    },
+    {
+      "name": "MCP Authorization Spec（OAuth 2.1 + PKCE + RFC 8707/9728）",
+      "description": "MCP HTTP transport 强制要求的安全授权规范。MCP server 作为 OAuth 2.1 Resource Server；MCP client 作为 OAuth 2.1 Client；授权服务器独立。强制要求：PKCE（所有公开客户端）、RFC 8707 Resource Indicators（防 token 误用攻击，resource 参数必须出现在 authorization request 和 token request 中）、RFC 9728 Protected Resource Metadata（server 必须实现 /.well-known/oauth-protected-resource）、RFC 8414/OIDC Discovery 授权服务器发现、RFC 9207 issuer 验证。2026 年新增 incremental scope consent（最小权限原则）和 step-up authorization flow。",
+      "maturity": "GA（Draft spec，持续更新）",
+      "projects": "modelcontextprotocol.io/specification/draft/basic/authorization",
+      "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization"
+    },
+    {
+      "name": "MCP Server 生态系统（三大注册目录）",
+      "description": "官方 Registry（registry.modelcontextprotocol.io，~9,652 records）负责权威发现；PulseMCP（15,930+ servers，创始人每日人工审核）负责质量过滤；Smithery（7,000+ servers，一键安装 + hosted remote servers）面向开发者；mcp.so（19,700+ servers）覆盖最广；Glama 面向企业托管。无单一注册中心覆盖全部 server，生产评估需交叉参考至少两个来源。",
+      "maturity": "成熟（多注册中心共存格局稳定）",
+      "projects": "registry.modelcontextprotocol.io, smithery.ai, mcp.so, pulsemcp.com, glama.ai",
+      "url": "https://www.truefoundry.com/blog/best-mcp-registries"
+    }
+  ],
+  "recommendations_for_user": [
+    "优先采用 Streamable HTTP transport 构建远程 MCP server：STDIO 仅适合单机本地进程，Web 端 AI Agent 的核心连接方式是 Streamable HTTP（HTTP POST + SSE），可部署在任意云平台，天然支持 OAuth 2.1 授权链路。",
+    "将 OAuth 2.1 授权纳入第一天设计：在任何暴露给用户的 web-facing MCP server 上，从一开始就实现 RFC 9728 Protected Resource Metadata + RFC 8707 Resource Indicators + PKCE。推荐委托外部 IdP（Auth0、Clerk、WorkOS 等），MCP server 只做 token 验证，不自建授权服务器。",
+    "采用 Agent Skills (SKILL.md) 标准封装可复用领域能力：无论使用 Claude Code、VS Code Copilot 还是 Cursor 作为开发环境，SKILL.md 文件一次编写即跨工具运行。将业务域知识、操作手册、代码片段封装为 Skills，避免重复 prompt 工程。",
+    "MCP + A2A 分层设计多 Agent 系统：当业务需要多个专业 agent 协作时，用 MCP 连接各 agent 自己的工具集（数据库、API、文件系统），用 A2A 实现 orchestrator agent 向 specialist agent 的任务委派。避免将 A2A 的 agent-agent 场景和 MCP 的 agent-tool 场景混用。",
+    "将 MCP Apps 扩展纳入交互设计路线图：对于需要展示图表、表单、审批工作流的网页端 Agent，MCP Apps（ui:// 沙盒 iframe）是目前唯一跨主流客户端的标准化富 UI 方案，无需为每个宿主平台单独开发前端。",
+    "注册 server 至官方 Registry 以提升可发现性：官方 Registry 支持 GitHub OIDC CI/CD 自动化发布，利用 namespace 所有权验证（io.github.<username>/<server>）建立可信发布链路，是面向企业用户分发 server 的最佳渠道。",
+    "防御 Tool Poisoning 与 Prompt Injection：不要无条件信任第三方 MCP server 的 tool description；在生产 Agent 中实现 tool description 白名单审计；对用户可上传内容的 Resource 执行输入净化；监控 CVE-2025-54136（MCPoison）类攻击面，考虑使用 MCP Gateway（如 TrueFoundry MCP Gateway）做 server 代理和内容过滤。",
+    "跟踪 2026-07-28 规范 RC 的无状态变更并提前适配：新规范移除了 initialize 握手和 Mcp-Session-Id，现有基于有状态 session 的 server 需在最终版发布后 12 个月内完成迁移。建议在 RC 期间用官方 conformance suite 测试兼容性。",
+    "利用 Tasks 扩展处理长时操作：网页端 Agent 常见的异步工作流（批量文件处理、多步骤审批、爬取任务）应使用 MCP Tasks 而非轮询 tool call，任务 handle 可跨请求追踪状态、支持重试和过期策略，与无状态 HTTP 架构完美兼容。",
+    "选择注册目录时交叉参考：官方 Registry 提供权威性但覆盖有限；mcp.so/PulseMCP 覆盖更广但质量参差；Smithery 提供最佳开发者体验（CLI 安装 + hosted remote）。对于企业级评估，至少对比官方 Registry 和 PulseMCP 两个来源，并查阅 TrueFoundry 或 Glama 的安全审计评级。"
+  ],
+  "sources": [
+    {
+      "title": "The 2026 MCP Roadmap | Model Context Protocol Blog",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-mcp-roadmap/"
+    },
+    {
+      "title": "The 2026-07-28 MCP Specification Release Candidate | Model Context Protocol Blog",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/"
+    },
+    {
+      "title": "MCP Authorization Specification (Official)",
+      "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization"
+    },
+    {
+      "title": "MCP Architecture Overview (Official Docs)",
+      "url": "https://modelcontextprotocol.io/docs/learn/architecture"
+    },
+    {
+      "title": "MCP Official Registry (GitHub)",
+      "url": "https://github.com/modelcontextprotocol/registry"
+    },
+    {
+      "title": "MCP Apps — Bringing UI Capabilities To MCP Clients | Model Context Protocol Blog",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/"
+    },
+    {
+      "title": "MCP Apps Official Extension Spec (GitHub)",
+      "url": "https://github.com/modelcontextprotocol/ext-apps/"
+    },
+    {
+      "title": "Linux Foundation Announces Formation of Agentic AI Foundation (AAIF)",
+      "url": "https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation"
+    },
+    {
+      "title": "Donating MCP and Establishing the Agentic AI Foundation | Anthropic",
+      "url": "https://www.anthropic.com/news/donating-the-model-context-protocol-and-establishing-of-the-agentic-ai-foundation"
+    },
+    {
+      "title": "MCP joins the Agentic AI Foundation | Model Context Protocol Blog",
+      "url": "https://blog.modelcontextprotocol.io/posts/2025-12-09-mcp-joins-agentic-ai-foundation/"
+    },
+    {
+      "title": "Equipping Agents for the Real World with Agent Skills | Anthropic Engineering",
+      "url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills"
+    },
+    {
+      "title": "Agent Skills — Claude API Docs",
+      "url": "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview"
+    },
+    {
+      "title": "Agent Skills Open Standard Specification (agentskills.io)",
+      "url": "https://agentskills.io/specification"
+    },
+    {
+      "title": "GitHub — agentskills/agentskills",
+      "url": "https://github.com/agentskills/agentskills"
+    },
+    {
+      "title": "GitHub — anthropics/skills",
+      "url": "https://github.com/anthropics/skills"
+    },
+    {
+      "title": "Agent Skills Open Standard Explained | paperclipped.de",
+      "url": "https://www.paperclipped.de/en/blog/agent-skills-open-standard-interoperability/"
+    },
+    {
+      "title": "Google A2A Protocol Explained | Atlan",
+      "url": "https://atlan.com/know/google-a2a-protocol/"
+    },
+    {
+      "title": "MCP vs A2A: The Complete Guide to AI Agent Protocols in 2026 | DEV Community",
+      "url": "https://dev.to/pockit_tools/mcp-vs-a2a-the-complete-guide-to-ai-agent-protocols-in-2026-30li"
+    },
+    {
+      "title": "A2A Protocol: 150+ Organizations in One Year | Stellagent",
+      "url": "https://stellagent.ai/insights/a2a-protocol-google-agent-to-agent"
+    },
+    {
+      "title": "MCP, OAuth 2.1, PKCE, and the Future of AI Authorization | Aembit",
+      "url": "https://aembit.io/blog/mcp-oauth-2-1-pkce-and-the-future-of-ai-authorization/"
+    },
+    {
+      "title": "MCP Authorization Spec Updates (June 2025) | Auth0 Blog",
+      "url": "https://auth0.com/blog/mcp-specs-update-all-about-auth/"
+    },
+    {
+      "title": "New MCP Authorization Specification (OAuth 2.1 + Resource Indicators) | dasroot.net",
+      "url": "https://dasroot.net/posts/2026/04/mcp-authorization-specification-oauth-2-1-resource-indicators/"
+    },
+    {
+      "title": "MCP Tool Poisoning CVE-2025-54136 | TrueFoundry",
+      "url": "https://www.truefoundry.com/blog/blog-mcp-tool-poisoning-gateway-defense"
+    },
+    {
+      "title": "MCP Security Vulnerabilities: Prompt Injection & Tool Poisoning 2026 | Practical DevSecOps",
+      "url": "https://www.practical-devsecops.com/mcp-security-vulnerabilities/"
+    },
+    {
+      "title": "MCP Server Ecosystem 2026 — 13000+ Servers | QCode.cc",
+      "url": "https://www.qcode.cc/mcp-servers-ecosystem-2026"
+    },
+    {
+      "title": "Best MCP Registries in 2026 | TrueFoundry",
+      "url": "https://www.truefoundry.com/blog/best-mcp-registries"
+    },
+    {
+      "title": "MCP Adoption Statistics 2026 | Digital Applied",
+      "url": "https://www.digitalapplied.com/blog/mcp-adoption-statistics-2026-model-context-protocol"
+    },
+    {
+      "title": "Security Threat Modeling for MCP, A2A, Agora, and ANP | arXiv",
+      "url": "https://arxiv.org/pdf/2602.11327"
+    },
+    {
+      "title": "Real Faults in MCP Software: Taxonomy | arXiv",
+      "url": "https://arxiv.org/pdf/2603.05637"
+    },
+    {
+      "title": "MCP Is Now Enterprise Infrastructure: MCP Dev Summit NA 2026 | AAIF",
+      "url": "https://aaif.io/blog/mcp-is-now-enterprise-infrastructure-everything-that-happened-at-mcp-dev-summit-north-america-2026/"
+    }
+  ],
+  "caveats": [
+    "Tool Poisoning / Prompt Injection 是头号安全坑：MCP server 的 tool description、resource content、prompt template 均可被攻击者注入恶意指令（CVE-2025-54136 MCPoison 已有在野利用）。任何消费第三方 server 的 agent 都必须实现 description 审计和内容净化，不可裸信任 server 元数据。",
+    "旧版 HTTP+SSE transport 已废弃，现有项目需迁移：2024 版规范的 HTTP+SSE transport 已在 2025-03-26 规范中被 Streamable HTTP 取代，现有基于旧 transport 的 server/client 应尽快升级，否则与新版 SDK 可能存在兼容性问题。",
+    "2026-07-28 RC 的无状态变更是破坏性变更：新规范移除 initialize 握手和 Mcp-Session-Id，目前生产中大量 server 依赖有状态 session，最终版发布后需要迁移窗口（规范给出 12 个月过渡期，但实际 SDK 支持时间线仍不确定）。",
+    "官方 Registry 仍处于 preview / v0.1 阶段，破坏性 API 变更仍可能发生：在 GA 前不建议将业务关键的 server 发现流程强依赖官方 Registry API，建议保留 mcp.so/Smithery 作为备份发现渠道。",
+    "A2A 虽已发布 v1.0.0，但生产级工具链尚不成熟：相比 MCP 的 97M 月下载量，A2A 的 SDK 生态仍以 Google 自研为主，社区第三方实现较少，跨厂商 agent 互操作仍处于早期。若团队只有一个 agent，无需引入 A2A 复杂性。",
+    "Agent Skills 开放标准的各平台支持程度不一致：虽然 32 个工具声称支持 SKILL.md，但部分工具（如 Cursor）需要手动放置文件，且对 bundled scripts 的执行权限各平台差异较大，跨平台前需逐一验证。",
+    "MCP Apps 的客户端兼容性有限：当前仅 Claude、Claude Desktop、VS Code Copilot、Goose、Postman 等少数客户端支持 MCP Apps 渲染，若目标用户使用其他客户端（如 ChatGPT 插件、第三方 MCP 客户端），UI 将静默降级为文本输出，需做兼容处理。",
+    "OAuth 2.1 Dynamic Client Registration 已被废弃为 legacy：规范推荐优先使用 Client ID Metadata Documents 方式注册，DCR（RFC 7591）仅保留作向后兼容，新实现不应以 DCR 作为主要注册路径。",
+    "MCP 规范仍未稳定到 v1.0：尽管生态规模庞大，规范本身处于快速迭代中（2024、2025-03-26、2025-06-18、2026-07-28 RC 多个版本），建议在 server 实现中做好版本协商（capability negotiation）以支持多版本客户端，同时关注废弃政策以免因延迟升级而失去兼容性。",
+    "工具/技术栈碎片化风险：MCP、A2A、Agent Skills 三套标准分别由 Anthropic/AAIF、Google/AAIF、agentskills.io 维护，虽然均托管于 AAIF 生态，但治理机制、发布节奏、SDK 质量差异显著，构建跨标准 Agent 时需跟踪三个上游的 breaking changes。"
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "repo": "https://github.com/Aider-AI/aider",
+  "one_liner": "一款面向开发者的 AI pair programming CLI，核心亮点是多格式代码编辑引擎（diff/whole/udiff/patch）+ tree-sitter PageRank 代码库地图 + 深度 git 集成，通过 litellm 统一适配 50+ LLM provider。",
+  "positioning": "aider 是一个高质量的 **代码编辑专用 AI Agent**，并非通用 Agent 框架。它把\"如何让 LLM 精准修改代码文件\"这一问题做到极致：多种 edit format 供不同模型选用、tree-sitter 驱动的代码库摘要地图、自动 git 提交与 /undo 回滚、lint/test 反射循环、以及 litellm 做 provider 无关适配。不覆盖 computer use / 日常规划，对写文章和调研支持也很有限。对标竞品是 GitHub Copilot Workspace、Cursor，而非 AutoGPT / Claude Code 等通用 Agent。",
+  "license": "Apache-2.0",
+  "primary_language": "Python 3.10–3.14",
+  "stack": "Python · litellm · tree-sitter / grep-ast · networkx (PageRank) · GitPython · prompt_toolkit · Streamlit (GUI) · diskcache · Playwright (可选 scrape) · Mixpanel/PostHog (analytics)",
+  "cross_platform_approach": "纯 Python CLI，依赖 prompt_toolkit 处理跨平台终端输入；可选 Streamlit GUI；Docker 镜像用于 benchmark 隔离执行；无原生桌面/移动/浏览器扩展层。",
+  "architecture": {
+    "agent_loop": "base_coder.py::run_one() 实现单轮反射循环：preproc_user_input → send_message（流式 LLM 调用）→ apply_updates（解析并写入文件）→ auto_commit → lint_edited → 若有错误则写入 reflected_message 重新进入循环，最多 max_reflections=3 次。整体是同步的 while+yield 生成器结构，不是 async。",
+    "context_memory": "ChatChunks 数据类将上下文切分为 system / examples / done / repo / readonly_files / chat_files / cur / reminder 八个段，分别拼装后计算 token。超限时 ChatSummary（history.py）用 weak_model 做递归摘要（二分法 split+summarize_all），摘要在后台线程异步执行。done_messages 持久化至 .aider.chat.history.md。",
+    "execution_sandbox": "无沙箱。shell 命令通过 run_cmd.py::run_cmd_subprocess() 直接执行于宿主系统。lint/test 命令同样直接调用。benchmark 体系用独立 Docker 容器隔离，但正常会话无隔离机制。",
+    "extensibility_plugins": "无插件系统。扩展点是：1) model-settings.yml 声明新模型的 edit_format/weak_model 等；2) 继承 base_coder.py::Coder 并实现 get_edits/apply_edits 即可添加新 edit format（Coder.create() 通过遍历 __all__ 做 format 匹配注册）；3) Commands 类 cmd_* 方法即斜杠命令，添加方法自动注册。",
+    "multi_agent": "architect 模式（architect_coder.py）是目前唯一的双 Agent 模式：主模型用 ArchitectCoder 生成方案文字，reply_completed() 后创建一个新的 editor_coder（edit format 为 editor-diff/editor-whole）执行具体文件编辑，然后把结果 cost/hashes 合并回主 coder。不支持并行 agent 或更复杂的 DAG 编排。",
+    "permission_security": "无运行时权限管控。文件写入直接通过 io.write_text()；git 操作直接调用 GitRepo；.aiderignore 文件可声明禁止 aider 修改的路径（pathspec 匹配）。--dry-run 标志可阻止实际写入。--no-verify 可跳过 git hooks（但需显式传参）。",
+    "prompt_engineering": "每个 edit format 对应一个 *Prompts 类（继承 CoderPrompts），内含 main_system / example_messages / system_reminder 三段。fmt_system_prompt() 用 str.format() 插入 fence、platform_info、shell_cmd_prompt、lazy/overeager 提示等动态字段。reminder 段根据模型配置以 sys 消息或追加至最后 user 消息两种方式注入，防止 LLM 遗忘格式要求。examples_as_sys_msg 将 few-shot 示例折叠进 system prompt（部分模型如 o1 无 system 时使用）。",
+    "provider_abstraction": "llm.py 定义 LazyLiteLLM 代理，延迟 1.5s 的 import litellm，首次调用时按需加载。所有 LLM 调用统一走 litellm.completion()，models.py 维护 ModelSettings dataclass + model-settings.yml，通过 ModelInfoManager 从 litellm 在线 JSON + 本地缓存获取 context window / pricing 等 metadata，OpenRouter 单独维护本地 API 缓存（openrouter.py）。",
+    "session_persistence": "会话历史以 Markdown 格式写入 .aider.chat.history.md（可用 --restore-chat-history 恢复）。repo map tags 缓存到 .aider.tags.cache.v4/（diskcache SQLite），失败时降级为内存 dict。无云端会话存储。",
+    "tool_system": "无独立工具调用框架（不使用 function calling 作为主要编辑手段，仅 editblock_func_coder 保留了旧的 function calling 路径）。'工具' 通过 Commands 类的 cmd_* 方法实现（/web 调用 scrape.py Playwright 抓页面、/run 执行 shell、/lint、/test、/undo 等），由用户显式触发或由 coder 通过 reflected_message 触发。",
+    "ui_surface_layers": "1) CLI：prompt_toolkit 交互式 REPL，支持补全、历史、语法高亮；2) Streamlit GUI（gui.py）：浏览器 Web UI，复用 CLI 的 Coder/IO 层，--browser 启动；3) --watch 模式（watch.py）：监听文件变更中的 AI 注释块自动触发；4) voice 输入（voice.py）：sounddevice + faster-whisper 语音转文字；5) 无 VSCode 插件 / Electron 桌面端。"
+  },
+  "capability_coverage": {
+    "code": "极强。这是 aider 的核心能力：多 edit format、repo map 上下文、auto-lint/test 反射循环、git 自动提交与 /undo。SWE-bench Lite 评测 18%+ 通过率（在公开榜靠前）。",
+    "writing": "基础。AskCoder（ask 模式）可用于文字讨论，但无 Markdown 写作专用 prompt、无大纲管理、无多文档组织能力。/web 命令可抓取参考资料。整体不适合作为写作助手。",
+    "research": "有限。/web + Playwright 抓页面、检测到 URL 自动询问加入 chat，但无多步搜索规划、无来源引用管理、无信息综合摘要流程。",
+    "computer_use": "不支持。无截图、点击、浏览器自动化能力（Playwright 仅用于网页内容抓取，不用于 computer use）。",
+    "planning": "基础。architect 模式让主模型先生成计划文字再由 editor 执行，属于两阶段规划。无长期任务分解、无 TODO 追踪、无日历/提醒集成。"
+  },
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/base_coder.py",
+      "role": "Agent 主循环、消息组装、反射机制、auto-commit、lint/test 集成的核心类 Coder"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/repomap.py",
+      "role": "tree-sitter + networkx PageRank 代码库地图，token 预算驱动的二分搜索裁剪"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/__init__.py",
+      "role": "所有 edit format coder 的注册表，Coder.create() 通过此列表做 format 路由"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/editblock_coder.py",
+      "role": "SEARCH/REPLACE block（diff format）解析与应用，最常用的高精度编辑格式"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/editblock_prompts.py",
+      "role": "diff format 的 system prompt + few-shot examples，含 fence 动态替换"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/udiff_coder.py",
+      "role": "unified diff format（udiff）解析与 fuzzy 应用"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/patch_coder.py",
+      "role": "OpenAI 风格 patch format，含 Chunk/PatchAction dataclass"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/architect_coder.py",
+      "role": "双 agent 架构：主模型规划 + editor_coder 执行"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/coders/chat_chunks.py",
+      "role": "ChatChunks dataclass，八段上下文结构 + Anthropic prompt cache header 注入"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/history.py",
+      "role": "ChatSummary：递归二分摘要，weak_model 后台线程执行"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/models.py",
+      "role": "ModelSettings dataclass、ModelInfoManager（litellm + 本地缓存）、MODEL_ALIASES"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/llm.py",
+      "role": "LazyLiteLLM 代理，延迟加载 litellm 节省启动时间"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/repo.py",
+      "role": "GitRepo 封装：auto-commit、dirty-commit、AI 生成 commit message、Co-authored-by trailer"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/resources/model-settings.yml",
+      "role": "每个已知模型的 edit_format / weak_model / cache_control 等声明式配置"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/commands.py",
+      "role": "所有 /cmd 斜杠命令实现，包含 /web /run /lint /test /undo /architect 等"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/gui.py",
+      "role": "Streamlit Web GUI，复用 CLI Coder/IO 层"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/linter.py",
+      "role": "多语言 linter 集成 + tree-sitter 错误行定位"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/benchmark/benchmark.py",
+      "role": "polyglot / exercism benchmark 驱动器，Docker 隔离执行"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/main.py",
+      "role": "CLI 入口，解析 args、构造 Coder、启动 REPL"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/aider/aider/watch.py",
+      "role": "文件监听模式，AI 注释块触发自动编辑"
+    }
+  ],
+  "standout_techniques": [
+    {
+      "name": "tree-sitter + networkx PageRank 代码库地图（RepoMap）",
+      "what": "用 tree-sitter 从每个文件提取 def/ref tag，构建文件间引用 MultiDiGraph，以当前 chat 文件为 personalization 节点跑 PageRank，将高权重 symbol 按 token 预算二分搜索裁剪后输出给 LLM。tag 以 mtime 为 key 持久化在 diskcache SQLite 中。",
+      "why_borrow": "解决了'如何在有限 token 内把最相关的代码库上下文送给 LLM'这一核心问题。可直接移植到任何需要大型代码库感知的 agent；personalization 向量的设计思路（chat 文件权重 ×50、mentioned ident 权重 ×10）值得复用。"
+    },
+    {
+      "name": "多 edit format 策略（diff / udiff / whole / patch / architect）",
+      "what": "每种 format 是一个独立 Coder 子类，携带专属 Prompts 类（system prompt + few-shot examples）和 get_edits/apply_edits 实现。Coder.create() 按 edit_format 字符串在 __all__ 中查找对应类，实现零配置注册。model-settings.yml 声明每个模型应使用哪种 format。",
+      "why_borrow": "将'如何表达代码变更'与'如何调用 LLM'解耦。新增 format 只需一个文件对，格式路由自动生效。自建 agent 应类似地把'输出解析策略'与'调用策略'分离，并为不同模型做最优 format 映射。"
+    },
+    {
+      "name": "反射循环（Reflection Loop）",
+      "what": "run_one() 每次调用后检查 reflected_message：apply_edits 失败的 ValueError、lint 错误文本、test 失败输出都会写入 reflected_message 并触发下一轮 LLM 调用，最多 max_reflections=3 次。这使 agent 能自动修复格式错误和 lint 问题。",
+      "why_borrow": "轻量级的自我修复机制，无需复杂的 tool-calling 框架，直接把错误文本当作下一轮 user 消息即可。适合任何需要 LLM 生成→验证→修复 闭环的场景。"
+    },
+    {
+      "name": "ChatChunks + 分段 prompt cache header",
+      "what": "将消息流拆分为 system/examples/done/repo/readonly_files/chat_files/cur/reminder 八段，add_cache_control_headers() 在 examples、repo、chat_files 三个相对稳定的段末尾注入 Anthropic cache_control:ephemeral，最大化缓存命中率。还实现了 cache warming 后台线程，每5分钟发一次 max_tokens=1 的心跳请求维持缓存。",
+      "why_borrow": "精细的 prompt cache 管理策略，稳定内容（system/examples）标记为 cacheable，动态内容（cur messages）不标记。cache warming 技巧可显著降低长会话的 API 成本。"
+    },
+    {
+      "name": "Git 深度集成（auto-commit + AI commit message + /undo）",
+      "what": "每次成功 apply_edits 后，GitRepo.commit() 用 weak_model 根据 diff 生成 commit message，支持 Co-authored-by trailer、aider: 前缀、GIT_AUTHOR_NAME 注入。commit_before_message 栈追踪每轮对话前的 HEAD，/undo 命令可精准回滚 aider 提交。",
+      "why_borrow": "把 git 变成 agent 的撤销/恢复基础设施，而非仅存储。任何代码 agent 都应将操作原子化为 git commit，使用户可以细粒度回退，这是安全感的重要来源。"
+    },
+    {
+      "name": "LazyLiteLLM + model-settings.yml 模型无关设计",
+      "what": "LazyLiteLLM 代理延迟 import litellm（节省 1.5s 启动时间），所有调用统一走 litellm.completion()。ModelSettings dataclass + YAML 声明每个模型的行为差异（edit_format、weak_model、cache_control、reasoning_tag 等），运行时动态查询 litellm 在线 JSON + 本地24h缓存获取 context window / pricing。",
+      "why_borrow": "通过 YAML 声明式管理模型差异，而非硬编码 if/else，易于扩展新模型。LazyLiteLLM 代理模式适用于任何需要延迟加载重型依赖的场景。"
+    },
+    {
+      "name": "Benchmark 体系（polyglot + SWE-bench + exercism）",
+      "what": "benchmark/benchmark.py 用 Docker 容器隔离运行各 coding exercise，支持多线程 (lox)、pandas 结果聚合、rungrid.py 做模型×format 网格实验。swe_bench.py 对接 SWE-bench Lite。plots.py 生成 over-time 趋势图。",
+      "why_borrow": "系统性评测不同 edit format 对不同模型的效果，是驱动 model-settings.yml 配置决策的数据依据。自建 agent 应建立类似的可量化评测流水线。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "无沙箱隔离：shell 命令直接在宿主环境执行，没有容器/虚拟机隔离，agent 执行任意 shell 存在安全风险。自建 agent 应为 code execution 提供隔离层。",
+    "无插件/扩展系统：添加新工具需修改源码（继承 Coder 或向 Commands 添加 cmd_*），不支持外部插件包。限制了生态扩展性。",
+    "同步阻塞主循环：agent 主循环是同步 while 循环，LLM 调用虽然流式但无 async/await，无法并发处理多个 agent 或多文件独立任务。architect 模式的 editor_coder 是串行调用，无并行化。",
+    "无多 agent 编排框架：只有 architect（2-level）一种 multi-agent 模式，无 DAG 任务图、无并行子任务、无 agent 间通信协议。不适合复杂的 agentic workflows。",
+    "UI 层薄弱：CLI 是唯一完整支持的界面，Streamlit GUI 功能有限（无文件树、无 diff 可视化），无 VSCode 插件、无 Electron 桌面端、无 Web 后端 API。",
+    "memory/持久化依赖文件系统：会话历史存为本地 Markdown 文件，无结构化存储、无跨设备同步、无长期知识库（RAG）集成。",
+    "computer use 能力完全缺失：无截图、无 DOM 操作、无 GUI 自动化，Playwright 仅用于抓取网页文字内容。",
+    "Analytics 硬编码 Mixpanel/PostHog token：mixpanel_project_token 和 posthog_project_api_key 明文写在 analytics.py 中，且默认对10%用户开启遥测，隐私边界模糊。",
+    "context 管理较粗糙：ChatSummary 摘要策略是基于 token 阈值的递归二分法，可能丢失重要历史细节；没有更精细的语义相关性筛选（如 embedding 检索）。"
+  ]
+}

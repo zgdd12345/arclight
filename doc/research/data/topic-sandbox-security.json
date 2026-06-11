@@ -1,0 +1,235 @@
+{
+  "topic": "Agent 执行沙箱与安全 (2025-2026 SOTA)",
+  "summary": "2025-2026 年，AI Agent 执行沙箱领域正经历从「能用」到「生产级」的快速演进。核心趋势有三：\n\n1. **内核原生隔离**正在取代「仅用 Docker」的做法。Linux Landlock+seccomp 组合与 macOS Seatbelt 已被 Cursor、OpenAI Codex、nono、Sandlock 等工具直接嵌入 Agent 进程树，实现 5 ms 级启动、近零运行时开销、无特权部署，成为本地/本机 Agent 的首选基础层。\n\n2. **microVM（Firecracker）与 gVisor** 已成为云端多租户代码执行平台的标准选项。E2B、Vercel Sandbox 采用 Firecracker（~150 ms 冷启动，<5 MiB/VM overhead），Modal 采用 gVisor（毫秒级启动，10-30% I/O 开销），Google Agent Sandbox（CNCF/Kubernetes SIG）则以统一 CRD 支持两者可切换。\n\n3. **跨平台统一 SDK** 成为新方向：Microsoft MXC（Build 2026 开源，MIT）、nono（Apache-2.0）都提供 JSON policy schema + 多 backend（OS native / microVM / Hyperlight），开发者无需关心底层机制差异。\n\nWebAssembly 方向（Pyodide/WASI Preview 2/Wassette）在浏览器端代码执行及轻量工具隔离中占据独特位置，但尚未取代 microVM 作为高信任场景的主力方案。\n\nComputer-use / 浏览器自动化场景的核心威胁已从「代码逃逸」转向「Prompt Injection」——需叠加语义层防护（HITL、二次 LLM 审查、HTTP 策略代理）而非单靠进程隔离。",
+  "sota_techniques": [
+    {
+      "name": "Linux Landlock + seccomp-BPF",
+      "description": "Linux 内核原生 LSM，自 5.13 起支持 Landlock，提供文件系统与网络能力的细粒度 allow-list；与 seccomp-BPF 结合可过滤危险 syscall。特点：无特权部署、不可撤销、继承子进程、~5 ms 启动开销。被 OpenAI Codex、Cursor、Sandlock、nono 等主流工具采用，是目前 Linux 上默认启用沙箱的少数 Agent 实现之一。",
+      "maturity": "生产可用（Linux 5.13+，内核稳定接口）",
+      "projects": "OpenAI Codex CLI, Cursor Agent Sandboxing, nono (github.com/always-further/nono), Sandlock (arxiv.org/html/2605.26298v1)",
+      "url": "https://docs.kernel.org/userspace-api/landlock.html"
+    },
+    {
+      "name": "macOS Seatbelt (sandbox-exec)",
+      "description": "苹果操作系统内核级沙箱框架，通过动态生成 Seatbelt profile 限制整个子进程树的文件 I/O 与 syscall。虽被 Apple 标记为 deprecated（2016），但仍被 Chrome、App Store 系统软件及 Cursor/nono/MXC 主动使用。网络控制粒度较粗（全开或全关），不支持 per-domain 白名单。",
+      "maturity": "生产可用（macOS 10.5+，持续维护中）",
+      "projects": "Cursor Agent Sandboxing, nono, Microsoft MXC (macOS backend)",
+      "url": "https://cursor.com/blog/agent-sandboxing"
+    },
+    {
+      "name": "Firecracker microVM",
+      "description": "AWS 开源的轻量虚拟机监控器，每个 workload 运行独立 Linux 内核（KVM），提供硬件级隔离。冷启动 ~125 ms，内存 overhead <5 MiB/VM，支持 150 VM/s/host。被 E2B、Vercel Sandbox 作为云端代码执行的核心隔离层。多租户场景下安全隔离最强，适合执行完全不可信的 LLM 生成代码。",
+      "maturity": "生产可用（AWS Lambda 底层技术，大规模商用）",
+      "projects": "E2B (github.com/e2b-dev), Vercel Sandbox (vercel.com/docs/sandbox), AWS Lambda",
+      "url": "https://github.com/firecracker-microvm/firecracker"
+    },
+    {
+      "name": "gVisor (runsc)",
+      "description": "Google 开源的用户态内核，通过拦截容器 syscall 并由 Go 实现的内核层处理，大幅减少宿主内核攻击面。启动时间为毫秒级，I/O 密集型场景有 10-30% 性能开销，计算密集型影响极小。Modal 用其作为 AI 代码执行沙箱底层，Google Agent Sandbox（Kubernetes SIG）以其为默认 runtime。",
+      "maturity": "生产可用（Google Cloud 生产部署，CNCF 关联项目）",
+      "projects": "Modal Sandboxes, Google Agent Sandbox (kubernetes-sigs/agent-sandbox), GKE Sandbox",
+      "url": "https://github.com/google/gvisor"
+    },
+    {
+      "name": "Kata Containers",
+      "description": "OCI/Kubernetes 兼容的 VM 级容器运行时，通过 Firecracker 或 Cloud Hypervisor 后端为每个 Pod 提供独立内核（~200 ms 冷启动）。与 gVisor 互为补充：gVisor 优于计算密集型，Kata 优于需要强内核隔离的场景。Google Agent Sandbox 以插件方式支持，Kata 社区发布了与 Agent Sandbox 深度集成的博文。",
+      "maturity": "生产可用（CNCF 孵化项目，大规模部署）",
+      "projects": "kubernetes-sigs/agent-sandbox, OpenStack Foundation",
+      "url": "https://katacontainers.io/blog/kata-containers-agent-sandbox-integration/"
+    },
+    {
+      "name": "Google Agent Sandbox（Kubernetes SIG）",
+      "description": "KubeCon NA 2025 发布的 CNCF Kubernetes SIG Apps 子项目，引入 Sandbox/SandboxTemplate/SandboxClaim 三种 CRD，统一 gVisor 和 Kata Containers 两种 runtime 后端，支持预热池（warm pool）实现 <1 s 冷启动。为 Kubernetes 原生多租户 Agent 部署提供标准化安全原语。",
+      "maturity": "早期稳定（2025-11 发布，正式进入 Kubernetes SIG）",
+      "projects": "github.com/kubernetes-sigs/agent-sandbox",
+      "url": "https://opensource.googleblog.com/2025/11/unleashing-autonomous-ai-agents-why-kubernetes-needs-a-new-standard-for-agent-execution.html"
+    },
+    {
+      "name": "Microsoft MXC（Microsoft eXecution Containers）",
+      "description": "Build 2026（2026-06）开源（MIT）的跨平台沙箱执行 SDK，通过 JSON policy schema + TypeScript SDK 统一多种 backend：Windows（ProcessContainer / Windows Sandbox / WSLC / MicroVM / Hyperlight）、Linux（Bubblewrap / LXC / MicroVM）、macOS（Seatbelt）。支持 filesystem、network、UI 三类 policy。OpenAI、Nvidia、Manus 已成为发布合作伙伴。注意：当前仍处于 early preview，官方声明暂不应视为安全边界。",
+      "maturity": "Early Preview（alpha 0.6.0，2026-06 刚开源，不建议立即生产使用）",
+      "projects": "github.com/microsoft/mxc",
+      "url": "https://github.com/microsoft/mxc"
+    },
+    {
+      "name": "E2B Sandbox",
+      "description": "专为 AI Agent 代码执行设计的云端 SaaS 平台，底层用 Firecracker microVM，提供 Python/JS SDK，<200 ms 冷启动，支持 24 小时持久 session，3500 万月下载量。社区提供大量模板（数据分析、computer-use、浏览器自动化等），与 LangChain/LlamaIndex/OpenAI/Anthropic SDK 直接集成。适合快速集成、不想自运维 microVM 的团队。",
+      "maturity": "生产可用（商用 SaaS，Fortune 100 客户，1B+ 启动次数）",
+      "projects": "github.com/e2b-dev (12.2k+ stars)",
+      "url": "https://e2b.dev/"
+    },
+    {
+      "name": "Vercel Sandbox",
+      "description": "Vercel 于 2026-01-30 GA 的代码执行 primitive，每个 sandbox 运行在独立 Linux microVM 中（含独立 filesystem、network、process space），最大 32 vCPU / 64 GB RAM（Enterprise），默认超时 5 分钟，最长 5 小时（Pro/Enterprise）。2026-04 起集成进主 vercel CLI（vercel sandbox 子命令）。与 Next.js / OpenAI Agents SDK 原生集成，适合 web 优先的 AI 应用。",
+      "maturity": "生产可用（GA 2026-01，vercel CLI 集成）",
+      "projects": "vercel.com/docs/sandbox, vercel/open-agents",
+      "url": "https://vercel.com/docs/sandbox"
+    },
+    {
+      "name": "Modal Sandboxes",
+      "description": "AI 基础设施平台 Modal 的沙箱产品，底层用 gVisor，运行时动态定义（Python 装饰器），是目前唯一支持在沙箱内使用 GPU 的主流方案——适合需要在同一隔离进程内完成推理/微调/工具调用的 Agent。定价按使用量计费。",
+      "maturity": "生产可用（商用 SaaS，2025-2026 快速迭代）",
+      "projects": "modal.com/docs/guide/sandbox",
+      "url": "https://modal.com/docs/guide/sandbox"
+    },
+    {
+      "name": "Daytona",
+      "description": "开源 AI Agent 沙箱运行时（Apache-2.0），2025 年初从开发环境管理平台转型为 AI Agent 基础设施。底层使用 Docker 容器，主打亚 90 ms（部分场景 27 ms）冷启动和持久化 workspace（跨 session 保持代码/依赖/文件）。隔离强度弱于 Firecracker/gVisor，适合对启动延迟极敏感、威胁模型允许容器级隔离的场景。",
+      "maturity": "生产可用（开源 + 托管 SaaS，2025 年活跃迭代）",
+      "projects": "github.com/daytonaio/daytona",
+      "url": "https://www.daytona.io/"
+    },
+    {
+      "name": "nono OS Sandbox",
+      "description": "开源（Apache-2.0）轻量级内核级 Agent 沙箱工具，通过 Landlock（Linux）/ Seatbelt（macOS）/ WSL2-Landlock（Windows）实现零 overhead、无特权的不可撤销文件系统隔离。提供 composable JSON profiles、credential proxy 注入、原子快照回滚、Merkle-tree 加密审计日志。brew install nono 即可使用。",
+      "maturity": "早期稳定（开源 Apache-2.0，设计合作伙伴计划阶段）",
+      "projects": "github.com/always-further/nono",
+      "url": "https://nono.sh/os-sandbox"
+    },
+    {
+      "name": "Sandlock",
+      "description": "学术/工程研究项目（arXiv 2605.26298），Rust 实现的 AI Agent 进程沙箱，结合 Landlock + seccomp-BPF + seccomp user notification，支持运行时动态 policy 回调（policy_fn）、Copy-on-Write workspace、多阶段 pipeline 能力分离。~5 ms 启动，~1900 次 sandboxed forks/s，接近裸金属 Redis 吞吐。",
+      "maturity": "研究原型（arXiv 论文，2025 年发布）",
+      "projects": "arxiv.org/html/2605.26298v1",
+      "url": "https://arxiv.org/html/2605.26298v1"
+    },
+    {
+      "name": "WebAssembly + WASI（Pyodide / Wasmtime / Wassette）",
+      "description": "WASI Preview 2 于 2025 年达到稳定，CPython-to-WASM（Pyodide）成熟度显著提升。浏览器端：将 LLM 生成的 Python 代码通过 Pyodide 在浏览器 JS 虚拟机内执行，服务器侧无任何 eval() 风险。服务端：Wasmtime/Wasmer/WasmEdge 提供 capability-based 细粒度权限（默认无 FS/网络/OS 访问）。Wassette（Microsoft Azure，2025-08）为 Agent 工具调用提供 WASM 级隔离。适合轻量工具沙箱和浏览器优先场景，不适合需要全 Linux 环境的复杂任务。",
+      "maturity": "逐渐成熟（WASI Preview 2 稳定，Pyodide 生产可用，Wassette 早期预览）",
+      "projects": "github.com/pyodide/pyodide, github.com/bytecodealliance/wasmtime, rawkode.academy/read/introducing-wassette/",
+      "url": "https://thenewstack.io/webassembly-sandboxing-ai-agents/"
+    },
+    {
+      "name": "Docker Sandboxes（增强型）",
+      "description": "Docker Desktop 4.60+ 的 AI Sandbox 功能使容器运行于独立 microVM 内（硬边界），突破了传统 Docker 共享宿主内核的根本性缺陷。对于不需要最强隔离的场景，结合 Landlock/seccomp profile、只读挂载、user namespace、网络白名单，仍是最易部署的方案。纯容器（无 microVM）已被社区多篇文章明确认定为「不够用于 AI Agent」。",
+      "maturity": "生产可用（Docker Desktop 4.60+ microVM 增强，传统容器成熟）",
+      "projects": "docker.com/blog/docker-sandboxes-run-agents-in-yolo-mode-safely/",
+      "url": "https://www.docker.com/blog/docker-sandboxes-run-agents-in-yolo-mode-safely/"
+    }
+  ],
+  "recommendations_for_user": [
+    "浏览器端代码执行优先选 Pyodide（WASM）：对于网页优先的个人 AI Agent，让 LLM 生成的 Python/JS 代码在用户浏览器内通过 Pyodide 执行，是零服务器风险、最低成本的起步方案；github.com/JosephTLucas/wasm-plotly 提供了可参考的实现模板。",
+    "服务端代码执行用 E2B 或 Vercel Sandbox 快速落地：两者均基于 Firecracker microVM，提供 SDK/框架集成（Anthropic、OpenAI、Next.js），无需自运维 VM。网页优先项目推荐 Vercel Sandbox（与 Next.js/Vercel 生态无缝集成）；需要持久化 session 或更多模板则选 E2B。",
+    "本地/CLI Agent 部署使用 nono 或 Cursor 风格的 Landlock+seccomp 方案：在 macOS 上 brew install nono，Linux 上使用 Landlock+seccomp-BPF，可实现接近零开销的不可撤销内核级隔离，且无需 root 权限。这是目前个人开发者能用的最低成本、最高安全性的本地方案。",
+    "GPU 或推理密集型任务选 Modal：Modal Sandbox 是目前唯一主流支持沙箱内 GPU 的平台，如果 Agent 需要在同一隔离环境内完成推理+工具调用，Modal 是唯一可行选项。",
+    "跨平台部署关注 Microsoft MXC：MXC 提供统一 JSON policy + TypeScript SDK，覆盖 Windows/Linux/macOS 多 backend，但当前仍是 early preview，建议跟踪其稳定进展（目前官方警告：不应视为安全边界），可用于非生产环境测评。",
+    "Computer-use / 浏览器自动化场景必须叠加语义层防护：进程级沙箱无法防御 Prompt Injection——浏览器网页中嵌入的恶意指令可以直接「指挥」Agent。建议强制启用 Human-in-the-Loop（HITL）审批高风险操作，并在 Agent pipeline 中加入二次 LLM 审查或 HTTP 层策略代理（如 Falco/Tetragon 监控 + 出口网络白名单）。",
+    "Kubernetes 规模化部署选 Google Agent Sandbox（kubernetes-sigs/agent-sandbox）：统一 CRD + warm pool + gVisor/Kata 可切换，是目前 Kubernetes 原生最成熟的 Agent 沙箱标准，适合未来业务量增长后的弹性扩展路径。",
+    "分层防御设计原则：不依赖单一隔离层。推荐组合：内核原生沙箱（Landlock/Seatbelt）+ 网络出口白名单 + 只读挂载（$HOME 等目录永不挂载）+ 超时自动销毁 + 审计日志。任何一层失效时其他层仍能限制爆炸半径。"
+  ],
+  "sources": [
+    {
+      "title": "A deep dive on agent sandboxes (Pierce Freeman)",
+      "url": "https://pierce.dev/notes/a-deep-dive-on-agent-sandboxes"
+    },
+    {
+      "title": "Implementing a secure sandbox for local agents (Cursor Blog)",
+      "url": "https://cursor.com/blog/agent-sandboxing"
+    },
+    {
+      "title": "How to sandbox AI agents in 2026: MicroVMs, gVisor & isolation strategies (Northflank)",
+      "url": "https://northflank.com/blog/how-to-sandbox-ai-agents"
+    },
+    {
+      "title": "E2B — The Enterprise AI Agent Cloud",
+      "url": "https://e2b.dev/"
+    },
+    {
+      "title": "E2B GitHub (e2b-dev)",
+      "url": "https://github.com/e2b-dev"
+    },
+    {
+      "title": "Vercel Sandbox Documentation",
+      "url": "https://vercel.com/docs/sandbox"
+    },
+    {
+      "title": "Modal Sandboxes Documentation",
+      "url": "https://modal.com/docs/guide/sandbox"
+    },
+    {
+      "title": "Microsoft MXC GitHub Repository",
+      "url": "https://github.com/microsoft/mxc"
+    },
+    {
+      "title": "Microsoft launches MXC — OS-level sandbox for AI agents (VentureBeat)",
+      "url": "https://venturebeat.com/security/microsoft-launches-mxc-an-os-level-sandbox-for-ai-agents-with-openai-and-nvidia-already-on-board"
+    },
+    {
+      "title": "nono OS Sandbox — Kernel-Level Isolation for AI Agents",
+      "url": "https://nono.sh/os-sandbox"
+    },
+    {
+      "title": "nono GitHub Repository",
+      "url": "https://github.com/always-further/nono"
+    },
+    {
+      "title": "Sandlock: Confining AI Agent Code with Unprivileged Linux Primitives (arXiv 2605.26298)",
+      "url": "https://arxiv.org/html/2605.26298v1"
+    },
+    {
+      "title": "Unleashing autonomous AI agents: Why Kubernetes needs a new standard (Google Open Source Blog)",
+      "url": "https://opensource.googleblog.com/2025/11/unleashing-autonomous-ai-agents-why-kubernetes-needs-a-new-standard-for-agent-execution.html"
+    },
+    {
+      "title": "Running Agents on Kubernetes with Agent Sandbox (Kubernetes Blog)",
+      "url": "https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/"
+    },
+    {
+      "title": "Kata Containers and Agent Sandbox Integration",
+      "url": "https://katacontainers.io/blog/kata-containers-agent-sandbox-integration/"
+    },
+    {
+      "title": "Sandboxing Agentic AI Workflows with WebAssembly (NVIDIA Technical Blog)",
+      "url": "https://developer.nvidia.com/blog/sandboxing-agentic-ai-workflows-with-webassembly/"
+    },
+    {
+      "title": "Introducing Wassette (WebAssembly for AI Agent tools)",
+      "url": "https://rawkode.academy/read/introducing-wassette/"
+    },
+    {
+      "title": "WebAssembly could solve AI agents' most dangerous security gap (The New Stack)",
+      "url": "https://thenewstack.io/webassembly-sandboxing-ai-agents/"
+    },
+    {
+      "title": "Docker Sandboxes: Run Agents in YOLO Mode, Safely (Docker Blog)",
+      "url": "https://www.docker.com/blog/docker-sandboxes-run-agents-in-yolo-mode-safely/"
+    },
+    {
+      "title": "Browser Sandboxing for Coding Agents: 2026 Security Guide (Blaxel Blog)",
+      "url": "https://blaxel.ai/blog/browser-sandboxing-for-coding-agents"
+    },
+    {
+      "title": "Agentic Browser Security: 2025 Year-End Review (Wiz Blog)",
+      "url": "https://www.wiz.io/blog/agentic-browser-security-2025-year-end-review"
+    },
+    {
+      "title": "Daytona vs E2B: which sandbox for AI code execution? (Northflank)",
+      "url": "https://northflank.com/blog/daytona-vs-e2b-ai-code-execution-sandboxes"
+    },
+    {
+      "title": "Linux Landlock kernel documentation",
+      "url": "https://docs.kernel.org/userspace-api/landlock.html"
+    },
+    {
+      "title": "Firecracker microVM GitHub",
+      "url": "https://github.com/firecracker-microvm/firecracker"
+    },
+    {
+      "title": "gVisor GitHub",
+      "url": "https://github.com/google/gvisor"
+    }
+  ],
+  "caveats": [
+    "Docker 容器共享宿主内核是根本性安全缺陷：任何内核漏洞或配置错误都可能导致容器逃逸并危及宿主机。纯 Docker（无 microVM 加固）已被社区多篇权威文章明确认定为「不足以保护 AI Agent 代码执行」，禁止将其作为多租户或高信任场景的唯一隔离层。",
+    "macOS Seatbelt 网络控制粒度不足：Seatbelt 只能全开或全关网络访问，无法实现「仅允许 HTTPS 到 api.openai.com」之类的精细出口控制。需要在应用层叠加网络代理或防火墙规则弥补此缺口。",
+    "Microsoft MXC 当前不应视为安全边界：官方 README 明确警告「no profiles should be treated as security boundaries currently」，仅适合非生产环境评测，不建议 2026 年即投入生产。",
+    "Landlock 要求 Linux 5.13+：旧版内核（如某些 LTS 发行版）不支持，nono 等工具虽会优雅降级，但实际上沙箱保护会静默失效，务必在部署前验证内核版本。",
+    "Prompt Injection 是进程隔离无法防御的威胁：沙箱只能限制「代码执行」的权限边界，无法阻止 Agent 被网页中嵌入的恶意指令「说服」去执行高权限操作。OWASP 2025 Top 10 for LLM Applications 将其列为首位风险，browser-use 场景必须在语义层叠加防护。",
+    "gVisor I/O 开销不可忽视：I/O 密集型任务（数据库访问、大文件读写）在 gVisor 下有 10-30% 性能损耗，选型时需基准测试目标 workload。",
+    "WASM/Pyodide 不能替代 microVM 用于高信任场景：WASM 沙箱强度依赖浏览器/运行时实现，CVE 历史记录表明浏览器沙箱逃逸仍真实存在（如 Chrome CVE-2025-2783）。对于需要执行任意系统代码的场景，Firecracker/gVisor 仍是必选。",
+    "本地 Agent 沙箱「默认关闭」是行业常态：目前只有 OpenAI Codex 是默认启用沙箱的主流 Agent，Cursor/Claude Code 等均为可选功能，开发者需主动配置才能生效，用户教育和默认安全配置至关重要。",
+    "冷启动延迟 vs 安全强度存在根本性权衡：Daytona（Docker）~27 ms，gVisor ~毫秒级，Firecracker ~125-200 ms，Kata Containers ~200 ms。对于交互式网页应用，需评估用户等待体验与所需安全级别之间的平衡，可通过 warm pool 预热缓解。",
+    "审计与可观测性经常被忽视：nono 等工具提供 Merkle-tree 加密审计日志，但多数团队在初期未配置。建议在沙箱层面强制开启不可篡改的执行日志，以满足合规与事后溯源需求。"
+  ]
+}

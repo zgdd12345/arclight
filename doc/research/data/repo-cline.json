@@ -1,0 +1,165 @@
+{
+  "repo": "https://github.com/cline/cline (本地路径: /Users/fsm/project/arclightagent/cline)",
+  "one_liner": "以 VSCode 侧边栏为主战场、多端共享同一 SDK 核心的 AI 编程 Agent，通过 gRPC-over-postMessage 将 React webview 与 TypeScript 后端解耦，具备 plan/act 双模式、shadow-git 检查点、MCP marketplace、子 Agent 编排等企业级特性。",
+  "positioning": "Cline (v3.88) 是目前最成熟的开源 VSCode AI Agent 扩展之一。它的核心定位是「IDE 原生的 agentic 编程助手」——直接嵌入开发者工作流，可读写文件、执行命令、操控浏览器、管理 git 快照。与 Cursor/Copilot 相比，Cline 将全部核心逻辑开源，并通过 @cline/sdk 对外暴露可编程接口，支持第三方在 CLI、JetBrains、Web dashboard 等多端复用同一 Agent 运行时。其商业模式依托 Cline 账号/Cline Router 进行 API 代理计费。",
+  "primary_language": "TypeScript (Bun 1.3 运行时；前端用 React + Vite；CLI TUI 用 OpenTUI；protobuf 定义用 proto3)",
+  "stack": "TypeScript / Bun / React / Vite / VSCode Extension API / gRPC-over-postMessage / protobuf (buf) / Puppeteer-core / simple-git / SQLite (via p-mutex) / chokidar / MCP SDK / Anthropic SDK / OpenAI SDK / Vercel AI SDK",
+  "license": "Apache License 2.0",
+  "architecture": {
+    "agent_loop": "Task 类（apps/vscode/src/core/task/index.ts）持有单个任务的完整生命周期。核心循环在 initiateTaskLoop() 里用 while (!this.taskState.abort) 不断调用 recursivelyMakeClineRequests()：发起 LLM 流式请求 → StreamResponseHandler 实时解析 → ToolExecutor 执行工具 → 结果回填 userMessageContent → 再次请求。若 LLM 未调用任何工具则注入 formatResponse.noToolsUsed() 强制继续。全局用 Mutex 序列化状态修改，TaskState 对象集中管理所有运行时标志（abort、isStreaming、consecutiveMistakeCount 等）。",
+    "context_memory": "三层策略：① ContextManager（context-management/ContextManager.ts）维护 Map<messageIndex, [EditType, Map<blockIndex, ContextUpdate[]>]> 的时序变更历史，支持按检查点时间戳截断回滚；② 自动压缩：SummarizeTaskHandler 触发 summarize_task 工具让模型生成摘要，替换早期对话；③ FocusChainManager 将任务进度以 Markdown checklist 写入磁盘文件并用 chokidar 监听，避免长任务中模型丢失目标。另有 FileContextTracker / ModelContextTracker / EnvironmentContextTracker 分类追踪不同维度的上下文变化。",
+    "execution_sandbox": "无真正沙箱隔离。安全边界来自三层机制：① CommandPermissionController 读取 CLINE_COMMAND_PERMISSIONS 环境变量（JSON allow/deny glob 列表），对 shell 命令做递归解析（含子 shell、重定向、链式操作符）；② ToolValidator 对每次工具调用做自动审批检查，不符合白名单则弹出用户确认 UI；③ ClineIgnoreController 参照 .clineignore 规则屏蔽敏感路径的读写。浏览器 computer use 通过 BrowserSession（Puppeteer-core + Chrome DevTools Protocol）在本机或远程 Chrome 上执行，不做额外沙箱。",
+    "extensibility_plugins": "四个扩展层：① MCP（Model Context Protocol）：McpHub 支持 stdio / SSE / StreamableHTTP 三种传输，带 OAuth 2.0、自动重连、文件监听热更新；本地缓存 mcp_marketplace_catalog.json 实现 marketplace 目录；② Skills：~/.cline/skills/<name>/SKILL.md 格式的可热加载技能文件，use_skill 工具在运行时注入系统提示；③ Hooks：PreToolUse / PostToolUse / TaskStart / TaskComplete / TaskCancel / PreCompact 六种钩子，调用外部进程（shell 脚本）；④ SDK 插件：@cline/sdk 对外提供 AgentRuntime / ClineCore API，第三方可自定义 tool executors（extensions/tools/types.ts）和 context compaction 策略。",
+    "multi_agent": "两个层次：① 内置 SubagentRunner（task/tools/subagent/SubagentRunner.ts）：在主任务循环内启动独立 LLM 对话，有自己的 ContextManager、ToolExecutorCoordinator，运行完毕返回 SubagentRunResult；AgentConfigLoader 从 .cline/agents/*.json 加载 Agent 配置（模型、工具集、系统提示）；② SDK 层 TeamSessionCoordinator（sdk/packages/core/src/session/team/）：基于 activeTeamRunIds 追踪并发子 Agent run，支持 run_queued/started/completed/failed/cancelled/interrupted 状态机，通过 invokeOptional 回调向后端广播进度。",
+    "permission_security": "① 命令白名单：CLINE_COMMAND_PERMISSIONS 环境变量控制，支持 allow/deny/allowRedirects，用 shell-quote 递归解析子 shell；② 工具自动审批：每个工具调用经 autoApprove.ts 判断，不通过则 ask() 阻塞等待用户确认；③ 代理感知网络层：shared/net.ts 封装 fetch/axios，在 VSCode/JetBrains/CLI 下自动注入代理 agent，防止 TLS 泄漏；④ 内容安全策略：WebviewProvider 为 webview HTML 注入 nonce + CSP；⑤ MCP OAuth：McpOAuthManager 处理 Authorization Code + PKCE 流程。",
+    "prompt_engineering": "模块化系统提示架构（system-prompt/）：PromptRegistry 单例管理多个 PromptVariant（generic / next-gen / xs / gpt-5 / native-gpt-5 / gemini-3 / hermes / glm 等 12+ 变体）；PromptBuilder 按 componentOrder 组装 agent_role / capabilities / rules / editing_files / mcp / skills / task_progress / act_vs_plan_mode 等组件，用 TemplateEngine 做 {{PLACEHOLDER}} 替换；工具定义也是 per-variant，ClineToolSet.getToolByNameWithFallback() 自动降级到 GENERIC。plan/act 双模式在系统提示中有独立的 act_vs_plan_mode.ts 组件说明边界。",
+    "provider_abstraction": "VSCode 扩展层：ApiHandler 接口（core/api/index.ts）定义 createMessage()/getModel()，buildApiHandler() 工厂注册 40+ provider（Anthropic / OpenAI / Gemini / Bedrock / Vertex / DeepSeek / Qwen / Ollama / LiteLLM / OpenRouter / vscode-lm 等）；Plan/Act 模式可分别配置不同 provider。SDK 层：@cline/llms 通过 Vercel AI SDK 统一抽象（providers/vendors/ 有 anthropic / openai / google / bedrock / vertex / mistral / community），catalog.generated.ts 自动生成模型元数据，支持 streaming、tool calling、reasoning effort、prompt caching。",
+    "session_persistence": "VSCode 扩展：StateManager 内存缓存 + 文件持久化（~/.cline/data/），chokidar 监听外部变更；任务对话历史以 JSON 文件存储（GlobalFileNames.apiConversationHistory），支持从历史恢复（resumeTaskFromHistory）。SDK 层：CoreSessionSnapshot（session-snapshot.ts）序列化完整会话状态；SessionManifestStore + ConversationStore 分离元数据与消息；CronService 支持定时自动化任务（automation.ts）。检查点与会话快照联动，RestoreResult 可回滚工作区文件并截断对话历史到对应时间点。",
+    "tool_system": "约 25 个内置工具，通过 ClineDefaultTool 枚举统一注册：read_file / write_to_file / apply_patch / search_files / list_files / list_code_definition_names / execute_command / browser_action / web_search / web_fetch / use_mcp_tool / access_mcp_resource / plan_mode_respond / act_mode_respond / attempt_completion / ask_followup_question / new_task / use_skill / summarize_task / condense / load_mcp_documentation / subagent 等。ToolExecutorCoordinator 维护 handler 注册表，每个 handler 实现 IToolHandler（完整执行）或 IPartialBlockHandler（流式预览）接口。ToolValidator 检查自动审批规则，autoApprove.ts 提供统一判断逻辑。",
+    "ui_surface_layers": "四个 UI 表层共享同一 @cline/sdk 核心：① VSCode Sidebar（主战场）：React webview（webview-ui/src/）通过 gRPC-over-postMessage 与扩展后端通信，组件覆盖 chat / settings / history / mcp / browser / worktrees / account 等面板；② CLI + TUI：apps/cli/src/tui/ 使用 OpenTUI（React-like 终端 UI 框架）渲染交互式聊天界面；③ Cline Hub Dashboard：apps/cline-hub/ 是 Bun HTTP + WebSocket 服务 + Vite webview，提供浏览器端会话管理面板（本地 LAN/tunnel 可选暴露）；④ External/JetBrains：hosts/external/ 通过 gRPC host-bridge 连接外部 IDE，ExternalWebviewProvider 复用同一 React webview 构建产物。"
+  },
+  "standout_techniques": [
+    {
+      "name": "gRPC-over-VSCode-postMessage 通信层",
+      "what": "webview 与扩展后端之间不用传统的 string 消息，而是用 protobuf 定义的 Service + RPC（proto/cline/*.proto），由 buf 生成 TypeScript 类型和客户端存根。webview 侧调用 UiServiceClient.method()，扩展侧 grpc-handler.ts 路由到对应 Controller handler。支持 streaming RPC（用 isLast 标志模拟）和请求取消。",
+      "why_borrow": "将 UI/后端通信升级为强类型契约，彻底消灭 switch-case 字符串消息地狱；新增功能只需加 .proto + 生成 + 实现 handler，无需在多处手写类型；streaming RPC 模式天然适合 Agent 的流式输出场景。全平台（Web/CLI/JetBrains）复用同一套协议定义，是支撑多端架构的关键。"
+    },
+    {
+      "name": "Shadow Git 检查点系统",
+      "what": "CheckpointTracker 在工作区外维护一个独立的 shadow git 仓库（路径由工作区名称哈希确定），对用户主仓库零干扰。每次工具调用前后可 commit 一个检查点（含文件快照），支持 diff 对比与 restore 回滚。ContextManager 的时序变更日志（Map<index, ContextUpdate[]>）与 git commit hash 联动，回滚文件的同时截断对话历史。",
+      "why_borrow": "Agent 执行具有不可预测性，检查点是生产可用性的底线。shadow git 方案无需修改用户 .git，兼容 mono-repo 和多根工作区（MultiRootCheckpointManager）。时序变更日志 + 二分查找截断的设计，使「回到任意历史时刻」在 O(log n) 内完成，值得在任何长期运行的 Agent 中复制。"
+    },
+    {
+      "name": "模块化分层系统提示（PromptRegistry + Variants）",
+      "what": "系统提示不是一个大字符串，而是 component（可复用节） + variant（模型族配置） + template（{{PLACEHOLDER}} 占位符引擎）三层组合。PromptRegistry 按模型族（next-gen/generic/xs/gpt-5/gemini-3 等）选 variant，PromptBuilder 按 componentOrder 组装并解析模板。工具描述也是 per-variant 的，ClineToolSet 提供 GENERIC 降级。所有组合快照化到 __tests__/__snapshots__ 做回归测试。",
+      "why_borrow": "支撑 40+ 模型 provider × 多能力场景（plan/act、有无 browser、有无 MCP）的提示工程，靠单文件根本不可维护。这套「注册表驱动 + 模板引擎 + 快照测试」的模式，是 prompt 工程工业化的范本。"
+    },
+    {
+      "name": "Skills 轻量技能系统",
+      "what": "~/.cline/skills/<name>/SKILL.md 文件用 frontmatter 声明元数据（name/description/triggers），由 discoverAvailableSkills() 扫描并注入系统提示的 SKILLS 组件；use_skill 工具在运行时把对应 SKILL.md 内容追加到提示，执行完后标注「不要再次调用」。支持本地文件 + 远程 org 配置两个来源。",
+      "why_borrow": "Skills 是「无需改代码即可扩展 Agent 行为」的最轻量路径——对应 arclightagent 的个人定制场景（写文章模板、调研框架、规划套路）。纯 Markdown 文件，git 可管理，零学习成本。"
+    },
+    {
+      "name": "Plan/Act 双模式 + task_progress 检查清单",
+      "what": "Mode 类型为 'plan' | 'act'，两种模式可配置不同 provider/模型/系统提示变体。Plan 模式下 LLM 使用 plan_mode_respond 工具与用户协商，支持 needs_more_exploration 参数让模型继续探索再回复。切换到 Act 时强制生成 task_progress checklist（Markdown 格式），FocusChainManager 持久化到文件并 chokidar 监听，防止长任务中目标漂移。",
+      "why_borrow": "双模式将「思考-规划」与「执行-工具调用」解耦，用户可以在不触发任何副作用的情况下细化需求。task_progress 持久化 checklist 对长任务（写文章、调研报告）尤为关键，是防止 Agent「失忆」的工程手段。"
+    },
+    {
+      "name": "Host Provider 依赖注入 + 多端 hostbridge",
+      "what": "HostProvider 单例持有平台相关能力（createWebviewProvider / createDiffViewProvider / createTerminalManager / getCallbackUrl / logToChannel），在 VSCode 扩展启动时注入 VSCode 实现，在 standalone/JetBrains 模式下注入 External 实现（ExternalHostBridgeClientManager）。外部宿主通过 gRPC host-bridge（独立端口）与扩展核心通信，webview HTML 构建产物完全复用。",
+      "why_borrow": "这是「一套 Agent 内核、N 个 UI 壳」架构的关键设计。arclightagent 要支持网页优先 + CLI + 桌面 + 插件，完全可以复制这个 HostProvider 模式：核心逻辑不 import 任何平台 API，只依赖注入的接口。"
+    },
+    {
+      "name": "AgentRuntime SDK + 多 Agent 团队编排",
+      "what": "sdk/packages/agents/src/agent-runtime.ts 提供独立的 AgentRuntime 类，两种配置形式：直接传 AgentModel（高级）或传 providerId + modelId（友好形式，内部调 @cline/llms gateway）。TeamSessionCoordinator 用 activeTeamRunIds Set 追踪并发子 Agent，通过 pendingTeamRunUpdates 队列汇聚结果，支持 run_queued / run_started / run_completed / run_failed / run_cancelled / run_interrupted 完整状态机。",
+      "why_borrow": "多 Agent 编排是复杂调研和规划任务的基础设施。AgentRuntime 的两种配置形式设计优雅，既方便快速原型又支持生产级定制。TeamSessionCoordinator 的事件驱动状态机可直接借鉴作为 arclightagent 的 multi-agent orchestrator。"
+    }
+  ],
+  "capability_coverage": {
+    "code": "极强（核心设计目标）：read_file / write_to_file / apply_patch / search_files / list_code_definition_names / execute_command 全套工具；DiffViewProvider 实时展示 diff；git worktree 支持多分支并行开发；shadow git 检查点保护；commit message 自动生成；JupyterNotebook 专项命令。",
+    "writing": "有限支持（工具齐备但无专项优化）：可调用所有文件读写工具创作文档，Skills 系统可注入写作规范，但无专门的写作模式、大纲生成、多稿对比等 UI。plan 模式可辅助结构化。",
+    "research": "中等（依赖 MCP 扩展）：内置 web_search 和 web_fetch 工具；browser_action 支持截图、点击、输入完整 computer use 流程（Puppeteer）；但无内置引用管理、多源综合、事实核验流程，需通过 MCP marketplace 集成外部搜索服务。",
+    "computer_use": "完整实现：BrowserSession（Puppeteer-core）支持 launch / screenshot / click / type / scroll / close 等动作，支持本地 Chrome 自动发现（BrowserDiscovery）和远程 CDP 连接（remoteBrowserHost）；webview 侧 BrowserSessionRow 实时展示截图流；proto/cline/browser.proto 定义完整操作协议。",
+    "planning": "良好（plan 模式 + FocusChain + Cron）：plan_mode_respond 工具专为规划对话设计；task_progress checklist 自动追踪；FocusChainManager 持久化进度文件；CronService 支持定时自动化任务（可用于日历/例行规划）；但无原生日历集成或 GTD 工作流，需通过 MCP 扩展。"
+  },
+  "cross_platform_approach": "Monorepo（Bun workspaces）分三层：① sdk/ 纯平台无关的核心逻辑（@cline/agents / @cline/core / @cline/llms / @cline/shared）；② apps/vscode 的 src/core/ 与 src/services/ 通过 HostProvider 接口隔离平台依赖，同一代码可在 VSCode / JetBrains / standalone cline-core 模式下运行；③ 各端 UI 独立构建（VSCode sidebar React webview、CLI OpenTUI TUI、cline-hub Bun HTTP + Vite），但 React webview 构建产物可跨 VSCode 和 JetBrains 复用。持久化存储统一写入 ~/.cline/data/（文件 JSON），三端共享同一状态，VSCode 迁移到此格式时有完整的 state-migrations.ts。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/task/index.ts",
+      "role": "Task 类主文件，包含 initiateTaskLoop() agent 主循环、startTask/resumeTaskFromHistory 入口、plan/act 模式切换逻辑"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/task/TaskState.ts",
+      "role": "任务运行时全状态对象，所有 flag（abort/streaming/planMode/checklist 等）集中于此"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/task/tools/ToolExecutorCoordinator.ts",
+      "role": "工具注册表，将 ClineDefaultTool 枚举映射到 handler 实例"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/task/tools/handlers/",
+      "role": "25 个工具 handler 目录（BrowserToolHandler / SubagentToolHandler / WebSearchToolHandler / CheckpointHandler 等）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/prompts/system-prompt/README.md",
+      "role": "系统提示架构文档，详述 PromptRegistry / PromptVariant / PromptBuilder / TemplateEngine 设计"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/prompts/system-prompt/variants/",
+      "role": "12+ 模型族 prompt 变体目录（next-gen / generic / xs / gpt-5 / gemini-3 等）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/integrations/checkpoints/CheckpointTracker.ts",
+      "role": "Shadow Git 检查点核心实现，含 CHECKPOINT_INIT / CHECKPOINT_COMMIT / CHECKPOINT_RESTORE 操作"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/context/context-management/ContextManager.ts",
+      "role": "对话历史时序变更管理，支持按时间戳截断回滚，与检查点系统联动"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/controller/grpc-handler.ts",
+      "role": "webview gRPC 请求路由中枢，含录制中间件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/proto/cline/",
+      "role": "所有服务的 protobuf 定义目录（task / ui / browser / checkpoints / mcp / models / hooks / worktree 等）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/hosts/host-provider.ts",
+      "role": "平台能力依赖注入单例，是多端架构的解耦枢纽"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/services/browser/BrowserSession.ts",
+      "role": "Puppeteer-core computer use 实现，支持本地/远程 Chrome"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/services/mcp/McpHub.ts",
+      "role": "MCP 服务器连接管理，含 stdio/SSE/HTTP 三种传输、OAuth、热更新"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/api/index.ts",
+      "role": "ApiHandler 接口定义 + buildApiHandler 工厂（注册 40+ provider）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/task/focus-chain/index.ts",
+      "role": "FocusChainManager，任务进度 checklist 持久化 + chokidar 监听"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/sdk/packages/agents/src/agent-runtime.ts",
+      "role": "独立 AgentRuntime SDK，支持 provider/model 两种配置形式"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/sdk/packages/core/src/session/team/team-session-coordinator.ts",
+      "role": "多 Agent 团队编排，run 状态机 + 并发追踪"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/sdk/packages/core/src/session/session-snapshot.ts",
+      "role": "会话完整状态序列化结构，含 checkpoint / team / lineage / usage"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/storage/StateManager.ts",
+      "role": "内存缓存 + 文件持久化状态管理器，跨平台共享 ~/.cline/data/"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/permissions/CommandPermissionController.ts",
+      "role": "shell 命令权限控制，glob 规则 + 子 shell 递归解析"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/vscode/src/core/hooks/hook-executor.ts",
+      "role": "统一 hook 执行器（PreToolUse / PostToolUse / TaskStart 等 6 种钩子）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/cline/apps/cline-hub/README.md",
+      "role": "Cline Hub 浏览器 dashboard 说明，体现 Web 端架构思路"
+    }
+  ],
+  "weaknesses_avoid": [
+    "VSCode 扩展形态的固有局限：所有 heavy lifting（LLM 调用、文件 IO、terminal）都跑在扩展宿主进程，与 VS Code 主进程同生共死。长任务或频繁 IO 可能导致 IDE 卡顿。arclightagent 做 Web 优先时应将 Agent 运行时放在独立服务进程（类似 cline-hub 的 daemon 思路），而非嵌入宿主。",
+    "StateManager 无跨实例同步：多窗口/多端同时运行时，每个实例有独立内存缓存，状态变更不广播给其他实例（设计上有意为之，但代码注释坦承这是已知问题）。arclightagent 多端场景需引入中央状态服务或 CRDT 同步层。",
+    "缺乏真正的执行沙箱：CommandPermissionController 依赖 allow/deny 列表，无内核级隔离（cgroups / seccomp / container）。browser_action 直接操控本机 Chrome，被恶意 prompt 诱导时风险较高。个人 Agent 的 computer use 应该考虑 Docker 或 nsjail 沙箱。",
+    "proto 生成代码在构建流程中是强依赖：新增任何 RPC 都需要手动在 proto/ 定义 → buf generate → 更新三处转换映射（models-api-configuration-conversion.ts 等），且遗漏任何一处会「静默回退到 Anthropic」——这是高熵错误，文档里也专门警告。arclightagent 若复制 gRPC 通信模式，需配套 lint 规则自动检测转换映射的完整性。",
+    "MCP marketplace 的 catalog 依赖外部服务（cline.bot）：catalog 以 JSON 缓存在本地，但无版本锁文件保证可重现安装，skills-lock.json 也是自定义格式。对于需要离线或企业内网的场景，这是硬限制。",
+    "webview 与扩展后端的通信仍有非类型化残留：虽然主路径已 gRPC 化，但仍存在直接 postMessage ExtensionMessage 的旧路径（subscribeToX 系列函数），新旧并存增加维护负担。新项目应从一开始统一为一种通信机制。",
+    "对「写文章/调研/日常规划」能力的抽象层次不足：Cline 的工具集、系统提示组件、UI 都深度面向代码场景（diff 视图、terminal、file tree），非代码任务（长文写作、引用管理、日历集成）完全依赖 MCP 插件，无原生支持。arclightagent 要做通用 AI Agent 需要在工具集和 UI 层面做专项投入。"
+  ]
+}

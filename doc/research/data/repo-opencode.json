@@ -1,0 +1,158 @@
+{
+  "architecture": {
+    "agent_loop": "V2 主循环在 packages/core/src/session/runner/llm.ts（402 行，核心 runTurnAttempt + run）。设计为'编排小协作者'而非单体：每个 provider turn 严格一次 llm.stream(request)；流式事件增量持久化（文本/usage/reasoning/tool-call）；工具调用先durably记录再用 FiberSet 并发执行、等待全部 settle 后再开下一轮。MAX_STEPS=25 限制步数。用 TurnTransitionError(defect) 实现两类转移：RebuildPreparedTurn（检测到并发 Session 变更需从durable状态重建）、ContinueAfterOverflowCompaction（上下文溢出后压缩重试）。run() 外层基于 SessionInput 的 steer/queue pending 驱动 openActivity 循环。整个循环跑在 Effect 上，uninterruptibleMask 保证工具 settlement 的中断安全。",
+    "tool_system": "packages/core/src/tool/tool.ts + registry.ts。Tool.make({description,input,output,execute,toModelOutput}) 用 Effect Schema 定义输入输出，自动转 JSON Schema 暴露给模型，execute 返回 Effect<Output, ToolFailure>。withPermission(tool, perm) 装饰器绑定权限名。ToolRegistry 用 scoped 注册 + Effect.addFinalizer 实现工具的热插拔（插件/MCP 可动态注册，scope 结束自动注销），materialize(permissions) 按权限规则过滤工具集。输出经 ToolOutputStore.bound 做大小限制（超限写入 Managed Tool Output File，模型只见有界预览）。内建工具：bash/edit/write/read/glob/grep/apply-patch/webfetch/websearch/todowrite/question/skill。task(子代理)/LSP 工具尚未从 V1 移植。",
+    "context_memory": "独立的'System Context'代数（CONTEXT.md 长篇规格 + packages/core/src/system-context/{index,registry,builtins}.ts）。每个 Context Source = 稳定 key + JSON codec + load effect + 纯 baseline/update/removal 渲染器。SystemContextRegistry 并发加载、按 key 稳定排序合并，保证确定性。引入 'Context Epoch'：一个纪元内 Baseline System Context 不可变并跨进程重启复用（对齐 provider 缓存前缀）；环境/日期等动态源变化时在'安全 provider-turn 边界'懒采样并产出一条 Mid-Conversation System Message（增量系统更新而非整段重发）。压缩(compaction.ts)用结构化 Markdown 模板(Goal/Constraints/Progress/Next Steps/Relevant Files)总结，KEEP_TOKENS=8000，并支持溢出后自动压缩重试。",
+    "provider_abstraction": "独立 @opencode-ai/llm 包，两层抽象。下层 protocols/：anthropic-messages、openai-chat、openai-responses、gemini、bedrock-converse 等协议适配器，把通用 LLMRequest 编解码为各 provider 原生 body 并把流式响应规整为统一 LLMEvent。中层 route/：Route = {protocol, endpoint, auth, transport, body.from/schema, cache-policy}，支持 http 与 websocket 两种 transport，可作为远程 LLM 网关运行（route/client.ts）。providers/ 提供 anthropic/openai/google/bedrock/azure/openrouter/xai/cloudflare/github-copilot/openai-compatible 等门面。另有 core/plugin/provider/ 下 40+ provider 作为插件（groq/mistral/perplexity/vertex/together/deepinfra...）。模型元数据走 models.dev。",
+    "execution_sandbox": "无真正的容器/沙箱隔离。bash 工具(tool/bash.ts)用 Effect ChildProcess 直接在 Location（工作目录）下执行 /bin/sh 或 Windows COMSPEC，默认超时 2 分钟（上限 10 分钟），输出有内存安全上限 1MB 并截断。安全主要靠 Permission 规则(allow/deny/ask) 在调用前拦截。存在 packages/containers 与 desktop WSL sidecar 用于跨平台进程承载，但工具执行本身未沙箱化。文件级安全由 Location 作用域强制（路径需在授权 Location 内）。",
+    "ui_surface_layers": "四端皆为同一 server 的客户端，经 @opencode-ai/sdk 生成的类型化 client + SSE 事件流(/event, /global/event)同步。1) TUI：OpenTUI + SolidJS reconciler（packages/tui，feature-plugins 化的 sidebar/home/session）。2) Web：SolidStart（packages/app），server-sdk.tsx 做事件订阅+coalescing（16ms 帧/8ms yield/250ms 重连），global-sync 维护 event-reducer/eviction/session-cache。3) Desktop：Electron（packages/desktop），main 进程 spawn 本地 server sidecar 并加载 web renderer，支持 WSL sidecar、自动更新、深链。4) CLI：Effect 命令框架(packages/cli)，含 serve/service(daemon)/migrate/debug。",
+    "extensibility_plugins": "两套扩展点。a) 插件 @opencode-ai/plugin：Plugin(input)=>Hooks，input 含 sdk client、project、$（Bun shell）、experimental_workspace.register（注册 local/remote WorkspaceAdapter，支撑远程工作区）。Hooks 覆盖极广：tool 注册、auth(oauth/api 流程+交互 prompts)、provider.models、chat.message/params/headers、permission.ask、command.execute.before、tool.execute.before/after、tool.definition、shell.env、以及 experimental.* 的 messages/system transform、compaction 提示定制、small_model 选择等。b) MCP：config/mcp.ts 支持 local(stdio) 与 remote(含 OAuth) 服务器。c) Skill：discovery + guidance，skill 工具按需注入指令与文件清单（权限校验后）。c) Agent/Command 也可由配置/插件定义。",
+    "multi_agent": "有 Agent 抽象(core/src/agent.ts)：Agent.Info 含 model/system/mode(subagent|primary|all)/permissions(Ruleset)/steps/color，支持隐藏的子代理定义与独立权限集。切换 selected agent 会触发 Context Epoch 替换（隔离不同 agent 的特权 baseline）。但 V2 中真正调度子代理的 task 工具尚未从 V1 移植（builtins.ts TODO 明确列出 task 待移植），故当前多代理为'可定义、调度待补'。",
+    "session_persistence": "基于 SQLite（Drizzle ORM, effect-sqlite-node / effect-drizzle-sqlite）。durable 输入模型是亮点：SessionV2.prompt 先写一条 durable session_input 行（steer 默认合并进当前活动、queue 开启 FIFO 未来活动），再发 advisory wake；serialized runner 在安全边界把 input 提升为可见 user message。SessionStore/SessionHistory/ContextEpoch 持久化对话与不可变 baseline。share 表(share/sql.ts)存 session_id/id/secret/url 支持分享链接（但 V2 的分享发布流程尚在重建）。EventV2 提供事件重放。",
+    "permission_security": "统一 Permission 模型(permission/schema.ts)：Rule={action,resource,effect(allow|deny|ask)}，Ruleset 数组，按 agent 绑定。工具用 withPermission 声明权限名，ToolRegistry.materialize 时按 Ruleset 用 Wildcard 匹配过滤/拦截。运行时 PermissionV2 服务 + 插件 permission.ask 钩子做交互式批准，question 工具支持向用户提问。saved.ts 持久化已授权决策。Location 作用域是第二道防线：文件/进程权限锚定授权目录。server 侧有 Authorization 中间件 + 可选 password 基础认证。SECURITY.md 存在。",
+    "prompt_engineering": "系统提示由 System Context 组合而成（环境/日期/AGENTS.md 指令聚合/skill guidance），而非单块字符串；agent.info.system 与 baseline 拼接为 system parts。压缩用结构化模板强约束输出格式。OpenAI 走 promptCacheKey（从 session id 派生）开启 provider prompt caching；anthropic 等协议各自的 cache-policy 在 route 层应用。AGENTS.md 文件作为项目级 instruction context 在安全边界懒加载并可热更新（发 Mid-Conversation System Message）。命令模板如 review.txt/initialize.txt 内置。",
+    "provider_abstraction_note": ""
+  },
+  "capability_coverage": {
+    "code": "极强（核心定位）。完整的 read/write/edit/apply-patch/glob/grep/bash 工具链，LSP 配置 schema（诊断集成在 V2 待接回），tree-sitter 解析（patches 含 bash/powershell grammar），多模型 coding agent，AGENTS.md 项目指令，git 感知 Location。这是该仓库唯一一线打磨的能力。",
+    "writing": "中等偏弱。无专门的写作/长文工具，但具备通用对话、文件编辑、Markdown 渲染（desktop/web 有 marked+shiki），可用于写文章但无大纲/引用/草稿管理等写作专属能力。结构化压缩模板显示其偏工程而非创作。",
+    "research": "中等。内建 websearch（Exa/Parallel 后端）+ webfetch 工具，MCP 远程服务器可接入更多检索源，provider-hosted web search 亦支持。但无多源交叉验证、引用管理、研究报告编排等调研专属流水线（对比本机的 deep-research skill 缺位）。",
+    "computer_use": "基本缺失。无 browser/screenshot/computer-use/GUI 自动化工具，无视觉 grounding 的点击工具。仅 read 工具支持图片输入（视觉理解），bash 可间接调外部工具。要做 computer use 需自建工具并接入（插件机制可支撑）。",
+    "planning": "中等。有 todowrite 工具（任务清单）、question 工具（澄清）、压缩模板含 Next Steps/Progress 跟踪，agent 可定义 steps 上限与子代理模式。但无日历/提醒/日程/cron 等日常规划集成，plan_exit 模式在 V2 待移植。偏'编码任务规划'而非'日常生活规划'。"
+  },
+  "cross_platform_approach": "单一 Effect 化 core 引擎 + 类型化 server（Effect HttpApi，自动产 OpenAPI，HttpRouter.toWebHandler 可跑 Cloudflare Workers/边缘），所有客户端（TUI/Web/Desktop/CLI）都通过 @opencode-ai/sdk 生成的类型化 client 与 SSE 事件流(/event,/global/event)消费同一 server，实现'写一次后端、多端复用'。Web=SolidStart；Desktop=Electron 内 spawn 本地 server sidecar 再加载同一套 web renderer（含 WSL sidecar 跨平台）；TUI=OpenTUI+Solid reconciler 复用 Solid 组件思维。server/client 彻底分离是其网页优先的关键：server 可本地、可远程、可边缘部署，client 仅持有连接与事件 reducer。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/session/runner/llm.ts",
+      "role": "V2 agent 主循环：provider turn 编排、工具并发 settle、上下文溢出压缩、steer/queue 驱动、step 限制（最核心文件）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/tool/tool.ts",
+      "role": "工具定义抽象：Schema 输入输出→JSON Schema、execute Effect、withPermission 装饰器、toModelOutput 投影"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/tool/registry.ts",
+      "role": "工具注册表：scoped 动态注册/注销、按权限 materialize 过滤、输出 bound 限制"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/CONTEXT.md",
+      "role": "System Context / Context Epoch / 增量系统消息 的完整领域规格（上下文与记忆管理的设计圣经）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/system-context/registry.ts",
+      "role": "System Context 注册表：codec+baseline/update 渲染器，确定性合并"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/system-context/builtins.ts",
+      "role": "内建 context 源示例（env/date 动态更新），展示增量系统消息机制"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/llm/src/route/client.ts",
+      "role": "provider 路由层：Route 抽象、http/websocket transport、可作远程 LLM 网关"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/llm/src/provider.ts",
+      "role": "provider 定义门面与 ModelFactory 抽象"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/server/src/api.ts",
+      "role": "server 端点定义：Effect HttpApi 分组 + OpenAPI + Authorization 中间件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/server/src/routes.ts",
+      "role": "server 装配：Layer 注入 + webHandler（边缘可运行）+ 可选 password 认证"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/plugin/src/index.ts",
+      "role": "插件 Hooks 接口全集（tool/auth/provider/chat.*/permission.ask/tool.execute.*/shell.env/experimental.*/WorkspaceAdapter）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/plugin/boot.ts",
+      "role": "插件引导：把 core 服务注入插件 effect，加载 provider/skill/command/agent 插件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/permission/schema.ts",
+      "role": "权限模型：action/resource/effect(allow|deny|ask) Ruleset"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/session/compaction.ts",
+      "role": "上下文压缩：结构化 Markdown 总结模板 + token 预算"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/app/src/context/server-sdk.tsx",
+      "role": "Web 端事件订阅+coalescing（帧批处理/重连），展示 client 如何消费 server SSE"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/desktop/src/main/index.ts",
+      "role": "Desktop：Electron 主进程 spawn 本地 server sidecar + WSL sidecar + 加载 web renderer"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/agent.ts",
+      "role": "Agent 抽象：subagent/primary 模式、独立权限集、steps、模型覆盖（多代理基础）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/core/src/config/mcp.ts",
+      "role": "MCP 配置：local(stdio) 与 remote(含 OAuth) 服务器"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/AGENTS.md",
+      "role": "代码风格与 V2 Session Core 架构约束（durable 输入/Location 作用域/单次 llm.stream）"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/opencode/packages/cli/src/index.ts",
+      "role": "CLI 入口：Effect 命令框架 + 懒加载 handlers + Daemon"
+    }
+  ],
+  "license": "MIT（LICENSE 文件，Copyright (c) 2025 opencode；仓库 anomalyco/opencode）",
+  "one_liner": "opencode：开源的全平台 AI 编码 agent，基于 Effect 的 server/client 分离架构，用一套类型化 server 同时驱动 TUI/Web/Desktop/CLI 四端。",
+  "positioning": "定位是'开源的 AI 编码 agent'（对标 Claude Code），强工程化、强可扩展。当前处于 V1→V2 的深度重写中：V2 把整个 core 迁到 Effect，引入 durable session、Context Epoch、类型化 HttpApi server、独立 LLM provider 路由层。对'全平台个人 AI agent'最大借鉴价值在于其 server/client 分离 + 单后端多端复用 + 强类型 SDK 生成 + 极完整的插件/权限/上下文模型；但它专精编码，写作/computer-use/日常规划几乎未覆盖，需自建能力层。",
+  "primary_language": "TypeScript（Bun 运行时，bun@1.3.14），少量 Rust/Go 原生依赖（tree-sitter、node-pty）",
+  "repo": "anomalyco/opencode（本地 fork 二进制名 lildax；上游 opencode.ai）",
+  "stack": "Bun + TypeScript monorepo（turbo + bun workspaces，catalog 统一版本）；核心框架 Effect 4.x（Schema/Layer/Context/Stream/Fiber）；server 用 effect 的 HttpApi + hono；持久化 SQLite + Drizzle ORM；LLM 层 ai-sdk + 自研 protocol/route 抽象；Web=SolidStart+Vite+Tailwind+Kobalte；TUI=OpenTUI(Solid reconciler)；Desktop=Electron；SDK 由 OpenAPI 生成；基础设施 SST/Cloudflare。",
+  "standout_techniques": [
+    {
+      "name": "server/client 彻底分离 + 单后端多端复用",
+      "what": "core 引擎与 Effect 类型化 HttpApi server 独立，TUI/Web/Desktop/CLI 全部通过自动生成的类型化 SDK client + SSE 事件流消费同一 server；server 可本地/远程/边缘(Workers webHandler)部署。",
+      "why_borrow": "这正是'网页优先、兼顾 CLI/桌面/插件'的标准答案：后端写一次，前端各端只做连接与事件 reducer。直接照搬这个分层可让你的个人 agent 天然多端。"
+    },
+    {
+      "name": "durable 输入模型（steer/queue + advisory wake）",
+      "what": "prompt 先写 durable session_input 行再发 advisory wake；steer 默认合并进当前活动、queue 开 FIFO 未来活动；serialized runner 在安全边界把输入提升为可见 user message。",
+      "why_borrow": "解决'用户在 agent 忙时插话'与崩溃恢复两大痛点，且是多端并发输入（网页+手机同时发）的正解。日常规划/长任务尤其需要这种可中断、可排队、可恢复的输入语义。"
+    },
+    {
+      "name": "System Context / Context Epoch 增量系统消息",
+      "what": "系统提示由带 codec 与 baseline/update/removal 渲染器的 Context Source 组合；一个纪元内 baseline 不可变并复用作 provider 缓存前缀；环境/日期/AGENTS.md 等变化时在安全边界懒采样，只发一条增量'系统更新'而非重发整段。",
+      "why_borrow": "既最大化 provider prompt cache 命中（省钱省延迟），又能在长会话里动态更新环境/时间/指令，对 computer-use（屏幕状态变化）和日常规划（日期/上下文漂移）极其关键。"
+    },
+    {
+      "name": "Effect Schema 化工具 + scoped 动态注册 + 输出 bounding",
+      "what": "Tool.make 用 Schema 定义输入输出自动转 JSON Schema；withPermission 装饰权限；registry 用 Effect.addFinalizer 实现工具热插拔；ToolOutputStore.bound 把超大输出落盘成 Managed File、模型只见有界预览。",
+      "why_borrow": "类型安全 + 自动 schema + 可热插拔(插件/MCP) + 输出膨胀防护，是工具系统的工程范本，直接可移植到任意 agent。"
+    },
+    {
+      "name": "独立 LLM provider 路由层（protocol+route+transport）",
+      "what": "@opencode-ai/llm 把 provider 抽象成 protocol 适配器(anthropic/openai/gemini/bedrock...) + Route(endpoint/auth/transport/cache-policy)，支持 http 与 websocket，可作远程 LLM 网关；40+ provider 以插件形式接入。",
+      "why_borrow": "provider 抽象与缓存策略下沉到独立包，换模型/换 provider/自建网关零侵入业务，是模型抽象层的高质量参考。"
+    },
+    {
+      "name": "极完整的插件 Hooks 面 + WorkspaceAdapter",
+      "what": "插件可注入 tool、定制 auth(含交互式 oauth/api prompt)、provider.models、改写 chat.params/headers/messages/system、permission.ask、tool.execute.before/after、shell.env，并注册 local/remote 工作区适配器。",
+      "why_borrow": "几乎所有 agent 行为都有钩子可改，且支持远程工作区——这套钩子设计可作为你插件体系的蓝本，尤其 system/messages transform 给二次开发留足空间。"
+    },
+    {
+      "name": "结构化压缩模板 + 溢出自动恢复",
+      "what": "压缩用固定 Markdown 模板(Goal/Constraints/Progress/Done/InProgress/Blocked/Next Steps/Critical Context/Relevant Files)强约束总结；上下文溢出时自动触发压缩并重试该 turn。",
+      "why_borrow": "长会话记忆管理的实战模板，结构化总结比自由文本更可控、可解析，适合调研/规划这类长上下文任务。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "专精编码：写作无专属工具、computer-use/浏览器/截图能力完全缺失、日常规划无日历/提醒/cron 集成。若要五大能力全覆盖，需在其工具层之上自建大量能力，不能指望开箱即用。",
+    "正处 V1→V2 大重写的中间态：task(子代理)、LSP 接回、plan_exit、share 发布流程、fuzzy edit 等多项功能在 builtins.ts 等处以 TODO 标注'待移植'，直接基于当前 dev 分支会踩半成品。",
+    "深度绑定 Effect 4.x（beta 版本）+ Bun + 大量 catalog/patch 依赖，学习曲线陡峭、生态小众、升级风险高；CONTEXT.md 这类领域规格虽精但理解成本极高，团队上手慢。",
+    "无真正执行沙箱：bash 工具直接在宿主 shell 跑命令，仅靠 Permission 规则与 Location 作用域防护；做 computer-use 或不可信代码执行时需自行补容器/沙箱隔离。",
+    "分享/协作能力在 V2 仅剩一张 share 表(session_id/secret/url)，完整 share-link 渲染与公开页尚未在 V2 重建，不能直接复用做'网页分享'。",
+    "desktop 用 Electron sidecar 模式（spawn 本地 server），包体大、资源占用高；若桌面端追求轻量需另选 Tauri 等方案。",
+    "多语言 README 与 console/stats/enterprise/slack 等大量外围包增加仓库体积与认知噪音，聚焦核心(core/server/llm/sdk)即可，勿被全量包结构带偏。"
+  ]
+}

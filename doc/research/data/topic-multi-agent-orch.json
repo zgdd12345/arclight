@@ -1,0 +1,220 @@
+{
+  "topic": "多智能体编排框架与模式 (Multi-Agent Orchestration Frameworks & Patterns) 2025-2026",
+  "summary": "2025-2026 年多智能体领域经历了从实验性探索到生产级落地的质变。核心趋势有五点：(1) 框架收敛整合——Microsoft 将 AutoGen 与 Semantic Kernel 合并为 Microsoft Agent Framework，OpenAI 用 Agents SDK 取代实验性 Swarm，框架层减少了碎片化；(2) 协议标准化——Google 于 2025 年 4 月发布 A2A (Agent2Agent) 协议并捐献给 Linux Foundation，Anthropic 的 MCP 在 16 个月内月下载量从 200 万增长至 9700 万次，两者分别解决 agent 间通信与 agent-to-tool 集成问题；(3) 图模型主导——LangGraph 的 DAG 状态图、Google ADK 的 Graph Workflows、Microsoft Agent Framework 的 Graph-based Workflows 均采用图结构，提供确定性控制流与可审计性；(4) 生产可靠性优先——人工审查节点 (human-in-the-loop)、检查点 (checkpointing)、时间回溯调试、可观测性 (tracing/span) 成为 2026 年生产框架的标配；(5) 三种核心编排模式被证明在生产中最为稳健：orchestrator-worker（单编排器 + 专用 worker）、planner-executor（规划与执行解耦）、以及通过 A2A/MCP 协议实现的跨框架 agent 互操作。LangChain 2025 State of AI Agents 报告显示 57% 的组织已有 agent 上线生产，质量与可靠性是首要阻碍因素。",
+  "sota_techniques": [
+    {
+      "name": "LangGraph",
+      "description": "基于有向图 (DAG) 的 agent 编排框架，节点代表 agent 或函数，边代表数据流与条件分支。核心优势：内置检查点与时间回溯调试、原生流式输出、human-in-the-loop 中断点、模型无关。v1.1 (2025年12月) 新增指数退避重试中间件与内容审核中间件。2026年被认为是生产级复杂状态管理的首选框架，Klarna、LinkedIn、Uber 等均已在生产部署。",
+      "maturity": "生产就绪 (Production-Ready)，成熟度最高",
+      "projects": "https://github.com/langchain-ai/langgraph",
+      "url": "https://www.langchain.com/langgraph"
+    },
+    {
+      "name": "CrewAI",
+      "description": "基于角色扮演 (role-based) 的多 agent 编排框架，每个 agent 定义 role/goal/backstory，任务在 Crew 内执行。2025年10月发布 v1.0.0，架构分为两层：Flows（事件驱动的编排层，管理状态与控制流）+ Crews（自主执行层，处理复杂协作任务）。支持顺序、层次、共识三种流程。63% 的 Fortune 500 企业使用，超10万开发者认证。学习曲线最低，适合快速原型。",
+      "maturity": "中等成熟 (Stable)，快速迭代中，最新版 v1.10.x (2026年Q1)",
+      "projects": "https://github.com/crewaiinc/crewai",
+      "url": "https://crewai.com/"
+    },
+    {
+      "name": "Microsoft Agent Framework (MAF)",
+      "description": "AutoGen 与 Semantic Kernel 的统一继任者，由同一团队开发，2026年Q1正式 GA v1.0。结合了 AutoGen 的简洁 agent 抽象与 Semantic Kernel 的企业级特性（会话状态管理、类型安全、中间件、遥测），并新增 Graph-based Workflows 实现显式多 agent 编排。支持 Microsoft Foundry、Azure OpenAI、Anthropic、Ollama 等多个模型提供商。AutoGen v0.4+ 已进入维护模式，不再添加新功能。",
+      "maturity": "生产就绪，企业级，v1.0 GA (2026年Q1)",
+      "projects": "https://github.com/microsoft/agent-framework",
+      "url": "https://learn.microsoft.com/en-us/agent-framework/overview/"
+    },
+    {
+      "name": "AutoGen / AG2",
+      "description": "原 Microsoft AutoGen 已拆分为三条路线：(1) Microsoft Agent Framework（官方继任者）；(2) AutoGen v0.7.x（稳定维护线）；(3) AG2（社区驱动的向后兼容 fork，保留 v0.2 GroupChat 风格）。AG2 由 ag2.ai 社区维护，适合需要对话式 GroupChat 多 agent 交互与代码生成迭代精炼的场景。模型无关，延迟表现与 LangGraph 相当。",
+      "maturity": "AG2 社区活跃维护中；AutoGen 官方已进入维护模式",
+      "projects": "https://github.com/microsoft/autogen",
+      "url": "https://www.microsoft.com/en-us/research/project/autogen/"
+    },
+    {
+      "name": "OpenAI Agents SDK",
+      "description": "2025年3月发布，是实验性 Swarm 框架的生产就绪继任者。三大核心原语：Handoffs（agent 间任务移交）、Guardrails（输入/输出验证）、Tracing（端到端可观测性）。2026年4月大版本更新引入：原生沙箱执行、长时程 harness、subagent 原语 (beta，父 agent 动态派生专用子 agent)、Realtime Agents（语音支持）。局限：仅支持 OpenAI 模型，状态默认短暂（ephemeral）。适合 OpenAI 生态优先且需要低摩擦上手的团队。",
+      "maturity": "生产就绪，OpenAI 官方维护，持续迭代",
+      "projects": "https://github.com/openai/openai-agents-python",
+      "url": "https://openai.github.io/openai-agents-python/"
+    },
+    {
+      "name": "Google ADK (Agent Development Kit)",
+      "description": "2025年 Google Cloud NEXT 发布的开源 agent 开发框架，2026年发布 ADK 2.0 引入 Graph Workflows。支持 Python、TypeScript、Go、Java、Kotlin 五种语言。核心特性：原生 A2A 协议支持（跨框架 agent 互操作）、多模态能力、层次化 agent 树、模板化编排模式（顺序/循环/并行）。Gemini 模型优化但通过 LiteLLM 支持 Anthropic、Meta、Mistral 等。可零代码改动部署至 Cloud Run、GKE 或 Google Agent Platform。",
+      "maturity": "早期生产 (Early Production)，快速成熟中",
+      "projects": "https://github.com/google/adk-python",
+      "url": "https://adk.dev/"
+    },
+    {
+      "name": "MetaGPT",
+      "description": "将人类软件公司的标准作业程序 (SOP) 编码为提示序列的多 agent 框架，内置产品经理/架构师/项目经理/工程师等角色。论文被 ICLR 2025 接收为 Oral。2025年2月推出 MGX（MetaGPT X），即世界首个 AI agent 开发团队产品化落地。AFlow 论文（自动 agent 工作流生成）同获 ICLR 2025 Oral。适合软件开发自动化流水线，不适合通用 agent 编排。",
+      "maturity": "研究/原型级别，实际软件生成场景有商业落地",
+      "projects": "https://github.com/FoundationAgents/MetaGPT",
+      "url": "https://docs.deepwisdom.ai/main/en/guide/get_started/introduction.html"
+    },
+    {
+      "name": "A2A (Agent2Agent) Protocol",
+      "description": "Google 于 2025年4月9日发布的开放标准，解决不同厂商 agent 之间的发现、委托与协调问题。技术栈：HTTP + Server-Sent Events + JSON-RPC 2.0，通过 Agent Cards 实现能力广告（capability advertisement），Tasks 定义工作单元生命周期（submitted → working → input-required → completed/failed）。2025年6月捐献给 Linux Foundation，支持方超过150家组织（Salesforce、MongoDB、Accenture、Deloitte 等）。与 MCP 互补：A2A 处理 agent 间通信，MCP 处理 agent 对工具的访问。",
+      "maturity": "规范已稳定，Linux Foundation 治理，生态快速扩展",
+      "projects": "https://github.com/google/A2A",
+      "url": "https://atlan.com/know/google-a2a-protocol/"
+    },
+    {
+      "name": "MCP (Model Context Protocol)",
+      "description": "Anthropic 于 2024年11月发布的开放标准，标准化 LLM 与外部工具/数据源的集成方式。2025年3月 OpenAI 正式采纳，2025年12月捐献给 Linux Foundation（AAIF）。截至 2026年3月月下载量达 9700 万次，16个月增长 4750%，社区和企业 MCP Server 超过 5800 个。2026年路线图重点：OAuth 2.1 企业认证、agent-to-agent 工具调用（多 agent 协作）、MCP Registry 验证目录。是现代 agent 工具集成的事实标准。",
+      "maturity": "事实标准 (De-facto Standard)，Linux Foundation 治理，生态成熟",
+      "projects": "https://github.com/modelcontextprotocol/servers",
+      "url": "https://modelcontextprotocol.io/docs/learn/architecture"
+    },
+    {
+      "name": "Orchestrator-Worker 模式",
+      "description": "2026年生产中部署最广泛的多 agent 编排模式。中央编排器接收任务、分类意图、分解为子任务、路由至专用 worker agent、汇总结果。推荐实践：先单独构建和测试每个 worker，再构建编排器连接它们；从中心化开始，仅在遇到具体瓶颈时再解耦。可靠性会在 agent 链中叠加衰减，需从设计之初引入幂等操作、检查点和人工审查门控。",
+      "maturity": "模式成熟，2026年生产默认模式",
+      "projects": "https://medium.com/@mjgmario/multi-agent-system-patterns-a-unified-guide-to-designing-agentic-architectures-04bb31ab9c41",
+      "url": "https://www.mindstudio.ai/blog/multi-agent-orchestration-patterns"
+    },
+    {
+      "name": "Planner-Executor 模式",
+      "description": "将推理与行动解耦为两个角色：Planner agent 负责将高层目标转化为可执行计划（解释意图、识别子任务、标明依赖关系）；Executor agent 执行每个步骤并回报结果。关键原则：规划者不应悄悄开始实现，执行者不应重新定义范围，审查者不应成为模糊的'思想伙伴'。适用于长时程任务、复杂工作流自动化和需要明确分阶段可审计的场景。",
+      "maturity": "模式成熟，2025-2026年广泛采用",
+      "projects": "https://www.union.ai/blog-post/build-a-planner-agent-system-with-parallel-execution-flyte-2-0-multi-agent-orchestration-with-union-ai",
+      "url": "https://arxiv.org/pdf/2509.08646"
+    },
+    {
+      "name": "Claude Agent SDK (Anthropic)",
+      "description": "Anthropic 2025年9月从 Claude Code SDK 更名发布，Python 和 TypeScript 双语言支持。内置：文件编辑工具、Bash 执行、网页搜索/抓取、带 human-in-the-loop 检查点的工具调用循环、子 agent（委托子代理拥有独立上下文）、持久会话、MCP 客户端。Computer Use 工具在 Claude Opus 4.6+ 上达到顶级 benchmark 水准（2026年2月）。新增 Tool Search Tool（无需消耗上下文访问数千个工具）和 Programmatic Tool Calling（代码执行环境中调用工具）。仅支持 Claude 模型。",
+      "maturity": "生产就绪，Anthropic 官方维护",
+      "projects": "https://github.com/anthropics/claude-agent-sdk-python",
+      "url": "https://code.claude.com/docs/en/agent-sdk/overview"
+    }
+  ],
+  "recommendations_for_user": [
+    "框架选型建议：构建全平台个人 AI Agent（网页端优先）时，推荐以 LangGraph 作为核心编排引擎——它提供模型无关的 DAG 状态图、内置检查点（支持长时程任务恢复）、human-in-the-loop 中断点和原生流式输出，这四点对个人 agent 的'长对话+多工具+可中断'场景至关重要。如果团队以 OpenAI 模型为主且希望快速上线，可以从 OpenAI Agents SDK 起步，待功能复杂度上升后迁移至 LangGraph。",
+    "工具集成层：无论选择哪个编排框架，都应将 MCP 作为工具集成标准。优先采用已有社区 MCP Server（数据库、CRM、搜索引擎、日历、邮件等超过 5800 个）而非自行封装工具。这样可以以极低成本为 agent 快速扩充能力，且未来可无缝切换底层框架。",
+    "跨 agent 通信：若计划在网页端部署多个专用 agent（如搜索 agent、写作 agent、日历 agent 协同工作），应提前规划 A2A 协议集成。Google ADK 对 A2A 支持最为原生；LangGraph 也在路线图中纳入 A2A 支持。这比自制 agent 间通信机制更具互操作性与未来兼容性。",
+    "编排模式选择：个人 agent 场景优先采用 Orchestrator-Worker 模式——一个主 agent 持有完整对话上下文，按需派生专用子 agent（搜索、代码执行、文件管理等）并接收压缩摘要，子 agent 之间不直接通信。2026年生产实践表明这是最稳健的拓扑，避免了 peer-to-peer mesh 的调试噩梦。",
+    "前端集成策略：网页端优先架构下，推荐将 agent 后端设计为无状态 HTTP API + 持久化状态存储（LangGraph 自带 checkpointer 可对接 PostgreSQL/Redis）。前端通过 Server-Sent Events (SSE) 接收 token 级流式输出，这与 LangGraph 和 OpenAI Agents SDK 的原生流式架构契合。避免 WebSocket 长连接作为主要通道——在多 agent 场景下 SSE 的可靠性和可调试性更强。",
+    "可观测性必须从第一天开始：多 agent 系统一次用户请求可产生 40-200 个 span，不上 tracing 等同于盲飞。LangSmith（LangGraph 配套）、OpenAI Tracing（Agents SDK 内置）、Langfuse（开源，框架无关）均是可选方案。设置 span 告警和 token 消耗监控，尤其是个人 agent 需要控制成本。",
+    "避免过度设计多 agent：研究表明很多团队不必要地引入多 agent 复杂度。判断标准：如果一个单 agent + 工具调用能完成任务就不需要多 agent；只有当任务存在自然并行性、需要不同专业能力、或单 agent 上下文窗口不够时才引入第二个 agent。从单 agent 开始，观察到具体瓶颈后再拆分。",
+    "Microsoft 生态用户迁移路径：如果现有项目基于 AutoGen 或 Semantic Kernel，官方建议迁移至 Microsoft Agent Framework（MAF）而非 AG2。MAF 已发布从 AutoGen 和 Semantic Kernel 的官方迁移指南，支持 Azure OpenAI、Anthropic 等多模型，且已在 2026年Q1 达到 GA v1.0 企业级稳定性。"
+  ],
+  "sources": [
+    {
+      "title": "LangGraph Official Site - Langchain",
+      "url": "https://www.langchain.com/langgraph"
+    },
+    {
+      "title": "LangGraph GitHub Repository",
+      "url": "https://github.com/langchain-ai/langgraph"
+    },
+    {
+      "title": "Microsoft Agent Framework Overview | Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-us/agent-framework/overview/"
+    },
+    {
+      "title": "AutoGen to Microsoft Agent Framework Migration Guide | Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-us/agent-framework/migration-guide/from-autogen/"
+    },
+    {
+      "title": "Microsoft AutoGen GitHub Repository",
+      "url": "https://github.com/microsoft/autogen"
+    },
+    {
+      "title": "CrewAI Official Documentation - Introduction",
+      "url": "https://docs.crewai.com/en/introduction"
+    },
+    {
+      "title": "CrewAI GitHub Repository",
+      "url": "https://github.com/crewaiinc/crewai"
+    },
+    {
+      "title": "OpenAI Agents SDK Official Docs",
+      "url": "https://openai.github.io/openai-agents-python/"
+    },
+    {
+      "title": "OpenAI - New tools for building agents (Agents SDK launch)",
+      "url": "https://openai.com/index/new-tools-for-building-agents/"
+    },
+    {
+      "title": "OpenAI - The next evolution of the Agents SDK (April 2026)",
+      "url": "https://openai.com/index/the-next-evolution-of-the-agents-sdk/"
+    },
+    {
+      "title": "OpenAI Swarm GitHub Repository (deprecated, educational)",
+      "url": "https://github.com/openai/swarm"
+    },
+    {
+      "title": "MetaGPT GitHub Repository",
+      "url": "https://github.com/FoundationAgents/MetaGPT"
+    },
+    {
+      "title": "MetaGPT Paper on arXiv",
+      "url": "https://arxiv.org/abs/2308.00352"
+    },
+    {
+      "title": "Google ADK Official Documentation",
+      "url": "https://adk.dev/"
+    },
+    {
+      "title": "Google ADK Python GitHub Repository",
+      "url": "https://github.com/google/adk-python"
+    },
+    {
+      "title": "Agent Development Kit: Making it easy to build multi-agent applications - Google Developers Blog",
+      "url": "https://developers.googleblog.com/en/agent-development-kit-easy-to-build-multi-agent-applications/"
+    },
+    {
+      "title": "Google A2A Protocol - Atlan Overview",
+      "url": "https://atlan.com/know/google-a2a-protocol/"
+    },
+    {
+      "title": "What Is Agent2Agent (A2A) Protocol? | IBM",
+      "url": "https://www.ibm.com/think/topics/agent2agent-protocol"
+    },
+    {
+      "title": "Model Context Protocol Architecture - Official Docs",
+      "url": "https://modelcontextprotocol.io/docs/learn/architecture"
+    },
+    {
+      "title": "MCP Hits 97M Downloads - Digital Applied",
+      "url": "https://www.digitalapplied.com/blog/mcp-97-million-downloads-model-context-protocol-mainstream"
+    },
+    {
+      "title": "Claude Agent SDK Overview - Claude Code Docs",
+      "url": "https://code.claude.com/docs/en/agent-sdk/overview"
+    },
+    {
+      "title": "Claude Agent SDK Python GitHub Repository",
+      "url": "https://github.com/anthropics/claude-agent-sdk-python"
+    },
+    {
+      "title": "Best Multi-Agent Frameworks in 2026: LangGraph, CrewAI - GuruSup",
+      "url": "https://gurusup.com/blog/best-multi-agent-frameworks-2026"
+    },
+    {
+      "title": "Multi-Agent in Production 2026: 3 Patterns That Survived",
+      "url": "https://niteagent.com/blog/multi-agent-production-2026/"
+    },
+    {
+      "title": "Multi-Agent System Patterns: A Unified Guide - Medium",
+      "url": "https://medium.com/@mjgmario/multi-agent-system-patterns-a-unified-guide-to-designing-agentic-architectures-04bb31ab9c41"
+    },
+    {
+      "title": "Architecting Resilient LLM Agents (arXiv)",
+      "url": "https://arxiv.org/pdf/2509.08646"
+    },
+    {
+      "title": "The Multi-Agent Trap | Towards Data Science",
+      "url": "https://towardsdatascience.com/the-multi-agent-trap/"
+    }
+  ],
+  "caveats": [
+    "框架更迭速度极快：AutoGen 在 2025-2026 年已实质性分裂为三条路线（MAF 官方继任、AutoGen v0.7 维护线、AG2 社区 fork），选型前务必确认你参考的文档/教程对应的是哪个分支，否则 API 完全不兼容。",
+    "OpenAI Agents SDK 的模型锁定：该 SDK 目前仅支持 OpenAI 模型，状态默认短暂（ephemeral），不适合需要跨模型灵活性或长时程持久化状态的个人 agent 项目。若后期需要切换到其他模型提供商，迁移成本较高。",
+    "可靠性叠加衰减问题：在 5 个主流框架的 150+ 任务测试中，研究者识别出 14 种不同失败模式，且很多是结构性问题而非提示词问题。即使修正拓扑结构后，正确率也仅从 25% 提升至 40.6%——远未达到生产可接受水平。多 agent 系统的可靠性需要从架构设计阶段就认真对待。",
+    "CrewAI token 消耗问题：基准测试显示，即使是简单的单工具调用任务，CrewAI 的 token 消耗量约为 LangGraph、AutoGen 等框架的 3 倍。在个人 agent 场景下长期运行的成本需要特别关注。",
+    "A2A 协议仍处于早期生态：虽然 A2A 已获得 150+ 组织支持并由 Linux Foundation 治理，但实际的 agent 互操作案例在 2026 年仍以 POC 为主，生产级跨框架 agent 编排的工程模式尚未完全稳定，不建议将其作为个人 agent 项目第一阶段的核心依赖。",
+    "MCP Server 质量参差不齐：MCP 生态快速扩展至 5800+ 服务器，但未经验证的社区 MCP Server 存在安全风险（数据泄露、权限越界）。2026 年 MCP 路线图将推出安全评级的 MCP Registry，在此之前使用第三方 MCP Server 需仔细审查其权限范围和数据处理策略。",
+    "Google ADK 的 Gemini 偏向性：虽然通过 LiteLLM 支持其他模型，但 ADK 的最佳性能和最完整的功能覆盖仍依赖 Gemini 模型。如果不在 Google Cloud 生态，使用成本和集成复杂度会显著增加。",
+    "自建 vs 托管平台的 TCO 陷阱：根据多方 2026 年生产案例，自建多 agent 系统的总拥有成本 (TCO) 通常比托管平台高 3-5 倍。对于个人 agent 项目，应优先评估 LangGraph Cloud、CrewAI Enterprise、OpenAI Assistants API 等托管选项，在确实有定制化需求时再自建基础设施。"
+  ]
+}

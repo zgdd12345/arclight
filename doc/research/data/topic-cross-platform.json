@@ -1,0 +1,206 @@
+{
+  "topic": "跨平台交付技术全景 2025-2026：Tauri vs Electron、Web→桌面、VSCode/Chrome 扩展 SDK、AI Agent 内核多平台打包、Bun/Node 单二进制分发",
+  "summary": "2025-2026 年跨平台交付技术格局已发生根本性重塑，核心趋势为：1) Tauri 2.0（2024.10 GA）以 Rust + 系统 WebView 取代 Chromium 打包，实现 ~12MB 包体与 ~85MB 内存占用，同时覆盖 iOS/Android，已对 Electron 构成实质竞争；2) Bun 的 `--compile` 成为 CLI 单二进制分发的最佳实践，Anthropic 以此交付 Claude Code；3) MCP（Model Context Protocol）已成为跨 CLI/桌面/浏览器扩展连接 AI Agent 的事实标准，VSCode 1.102 正式 GA；4) Chrome MV3 已强制落地，Prompt API（Gemini Nano on-device）让浏览器扩展可原生跑本地推理；5) \"同一 agent 内核 + 多层外壳（CLI/桌面/扩展/web）\"架构通过 MCP stdio/HTTP 传输层实现，是构建全平台个人 AI Agent 的主流路径。",
+  "sota_techniques": [
+    {
+      "name": "Tauri 2.0",
+      "description": "Rust 核心 + 系统原生 WebView（Windows: Edge WebView2，macOS: WKWebView，Linux: WebKit2GTK）。包体约 12MB，内存约 85MB，冷启动 1.8s。Tauri 2.0 新增 iOS/Android 支持，权能式权限系统（Capability-based），插件生态 30+ 官方插件，支持 Swift/Kotlin 原生扩展。与 Electron 相比安全性更高（默认关闭所有系统 API）。",
+      "projects": "tauri-apps/tauri（GitHub 87k+ stars）；代表应用：Zed editor（部分组件），1Password 8",
+      "maturity": "生产可用（GA，v2.x 稳定）",
+      "url": "https://v2.tauri.app/"
+    },
+    {
+      "name": "Electron（持续演进）",
+      "description": "内置 Chromium + Node.js，包体 150-180MB，内存 300-450MB。优势在于成熟生态、JavaScript 全栈、无需 Rust。2025 年增强了 Fuses 安全开关和 Context Isolation 默认策略。对于团队已有 JS 能力且不在乎包体大小的场景仍是路径最小阻力的选择。",
+      "projects": "electron/electron；VS Code、Figma、Slack、Discord",
+      "maturity": "生产可用（极成熟，v30+）",
+      "url": "https://www.electronjs.org/"
+    },
+    {
+      "name": "Electrobun v1",
+      "description": "TypeScript-first 桌面框架，后端运行时为 Bun（非 Node.js），前端使用系统 WebView。相比 Electron 包体缩小约 75%（~64MB vs 271MB），差量更新补丁可小至 14KB。无需 Rust，全程 TypeScript，适合已用 Bun 的 JS/TS 团队快速迁移。框架尚年轻，文档与社区生态仍在完善。",
+      "projects": "nicholasgasior/electrobun",
+      "maturity": "早期生产可用（v1 已发布，生态较新）",
+      "url": "https://blackboard.sh/electrobun/docs/"
+    },
+    {
+      "name": "Wails v3（Go 桌面框架）",
+      "description": "用 Go 编写后端逻辑，前端使用系统 WebView，概念与 Tauri 类似但面向 Go 开发者。v3 引入多窗口支持、更强的静态绑定分析器、系统托盘、更透明的构建系统。当前为 Alpha 阶段，部分应用已在生产运行。适合已有 Go 代码的 AI Agent 后端需要桌面壳的场景。",
+      "projects": "wailsapp/wails（GitHub 27k+ stars）",
+      "maturity": "Alpha（v3），v2 生产可用",
+      "url": "https://v3.wails.io/"
+    },
+    {
+      "name": "NeutralinoJS",
+      "description": "极轻量跨平台桌面框架，不打包任何 runtime，直接调用 OS 原生 webview 与系统 API。包体仅几 MB。支持 Linux/macOS/Windows/Web。适合超轻量工具类 Agent 应用。API 能力弱于 Tauri，但部署极简单。",
+      "projects": "neutralinojs/neutralinojs",
+      "maturity": "生产可用（稳定）",
+      "url": "https://neutralino.js.org/"
+    },
+    {
+      "name": "Bun --compile 单二进制",
+      "description": "一条命令将 TypeScript/JavaScript 代码 + 所有依赖 + Bun 运行时打包为单个可执行文件。支持跨平台编译（--target 指定 bun-linux-x64、bun-darwin-arm64、bun-windows-x64 等 8 种目标），支持字节码编译（--bytecode，启动速度提升 2x），支持内嵌静态资源（`with { type: 'file' }`），支持全栈打包（import HTML 文件自动打包前端资源）。Anthropic 以此方式分发 Claude Code CLI。启动速度比 Node.js 快 5-8x。",
+      "projects": "oven-sh/bun；Claude Code (Anthropic)",
+      "maturity": "生产可用（Bun v1.x 稳定）",
+      "url": "https://bun.sh/docs/bundler/executables"
+    },
+    {
+      "name": "Node.js SEA（Single Executable Applications）",
+      "description": "Node.js 从 v19.7.0 开始内置 SEA 支持，v21+ 通过 `--build-sea` 标志直接生成单二进制可执行文件，替代已废弃的 vercel/pkg。需要先生成 blob 再用 postject 注入主机二进制。相较 Bun --compile 流程更繁琐，但无需引入额外运行时依赖，适合已有 Node.js 投资的项目。",
+      "projects": "nodejs/single-executable；nodejs.org 官方文档",
+      "maturity": "实验性→稳定（Node 22+ 较成熟）",
+      "url": "https://nodejs.org/api/single-executable-applications.html"
+    },
+    {
+      "name": "Deno compile",
+      "description": "deno compile 自 v1.6 支持将 TS/JS 打包为跨平台单二进制，内嵌 denort 运行时。v2.8+ 支持检测 Next.js/Astro/Fresh 等 web 框架自动编译。支持 --target 跨平台编译、npm 包、Web Workers、代码签名。二进制体积在 v1.41+ 缩小 50%。适合同时需要 Web 标准 API 兼容与单二进制分发的 Agent。",
+      "projects": "denoland/deno",
+      "maturity": "生产可用（Deno 2.x 稳定）",
+      "url": "https://docs.deno.com/runtime/reference/cli/compile/"
+    },
+    {
+      "name": "VSCode Extension SDK + Language Model API + Chat Participants",
+      "description": "VSCode 提供 `vscode.lm` 命名空间（Language Model API）允许扩展直接调用用户配置的语言模型，Chat Participants API 允许扩展向 Copilot Chat 贡献自定义 @participant，Tool definitions 允许扩展暴露语言模型可调用的工具。2026.06 新增 VSCODE_AGENT 环境变量检测、Agent Host Protocol（AHP）、远程 agent 会话跨客户端协调能力。Prompt TSX 支持声明式 prompt 构建。",
+      "projects": "microsoft/vscode；GitHub Copilot 扩展；Copilot Studio 扩展",
+      "maturity": "生产可用（Language Model API GA，部分特性仍 Preview）",
+      "url": "https://code.visualstudio.com/api/extension-capabilities/overview"
+    },
+    {
+      "name": "MCP（Model Context Protocol）in VSCode",
+      "description": "VSCode 1.102（2025.07 GA）完整实现 MCP 规范，支持 tools/prompts/resources/sampling/authorization。扩展可注册为 MCP server，也可消费外部 MCP server。通过 stdio（本地进程）或 Streamable HTTP（远程）传输。使 Agent 内核与 IDE 解耦，同一个 MCP server 可被 VS Code、Claude Desktop、Cursor 等多个宿主共用。",
+      "projects": "microsoft/vscode；anthropics/anthropic-tools；syedshamir/MCP-Server-VSCode",
+      "maturity": "生产可用（GA）",
+      "url": "https://code.visualstudio.com/blogs/2025/06/12/full-mcp-spec-support"
+    },
+    {
+      "name": "Chrome Extension MV3 + Prompt API（Gemini Nano on-device）",
+      "description": "MV3 已强制落地（2025.06 deadline）：service worker 替代 background page（30s 无活动休眠，WebSocket 保持存活），禁止远程代码执行，所有 JS 必须随扩展包审核。Prompt API（Chrome 131-136 Origin Trial）允许扩展直接调用 Gemini Nano 本地推理（WebGPU 加速），无需云端 API。Chrome 148 起 `browser.*` 命名空间统一所有扩展 API 实现跨浏览器兼容。Side Panel API 成熟，offscreen documents 支持 LOCAL_STORAGE/WORKER 等新用途。",
+      "projects": "GoogleChrome/chrome-extensions-samples；Gemma Gem（本地 AI agent Chrome 扩展）",
+      "maturity": "MV3 生产可用；Prompt API 原始试验阶段",
+      "url": "https://developer.chrome.com/docs/extensions/whats-new"
+    },
+    {
+      "name": "MCP（Model Context Protocol）协议本体",
+      "description": "Anthropic 提出、现由多方共同维护的开放协议，基于 JSON-RPC 2.0，定义 AI agent（client）与工具/数据源（server）间的标准化交互。支持 stdio（本地进程间）和 Streamable HTTP+SSE（远程/鉴权）两种传输。2025 年被 OpenAI、Microsoft、Google、Cloudflare 等主流平台采纳，Python/JS SDK 周下载量超 2000 万。是实现「同一 Agent 内核对接 CLI、桌面应用、VSCode、Web」的核心枢纽。",
+      "projects": "modelcontextprotocol/specification；anthropics/mcp-servers；microsoft/vscode（内置支持）",
+      "maturity": "生产可用（快速演进中）",
+      "url": "https://modelcontextprotocol.io/"
+    },
+    {
+      "name": "Microsoft Semantic Kernel（多语言 Agent 框架）",
+      "description": "微软开源的多语言（C#/Python/Java）AI agent 编排框架，Kernel 作为依赖注入容器管理 LLM 服务与插件（Plugin）。Plugin 是 agent 能力的标准化封装，支持 MCP server 对接、OpenAI/Azure/Anthropic 等多后端。与 AutoGen 合并为统一的 Microsoft Agent Framework（2025.10 宣布）。适合企业级多 agent 编排场景。",
+      "projects": "microsoft/semantic-kernel；microsoft/autogen",
+      "maturity": "生产可用（稳定，v1.x）",
+      "url": "https://learn.microsoft.com/semantic-kernel/frameworks/agent/"
+    },
+    {
+      "name": "PWA（Progressive Web App）+ 浏览器原生桌面安装",
+      "description": "对于不需要深度系统 API 的 AI Agent 工具，PWA 是零安装成本的「桌面化」路径：Service Worker 离线缓存、Manifest 使网页可安装为桌面/手机 App、Web Push 通知、File System Access API 操作本地文件。结合 WebGPU/WASM 可在浏览器内运行小型 LLM。适合 web-first 优先的 Agent 作为初期分发策略。",
+      "projects": "Chrome 内置 PWA 安装；Excalidraw、Notion 等已采用",
+      "maturity": "生产可用（成熟）",
+      "url": "https://web.dev/progressive-web-apps/"
+    }
+  ],
+  "recommendations_for_user": [
+    "架构核心：将 Agent 内核设计为 MCP server（Streamable HTTP + stdio 双模式），内核本身无 UI 依赖。这样同一个内核可以被：① CLI（Bun 单二进制直接内嵌）② 桌面壳（Tauri/Electrobun 作为壳，通过 stdio 本地启动 MCP server）③ VSCode 扩展（注册为 MCP server，VSCode 1.102+ 原生消费）④ Chrome 扩展（background service worker 作为 MCP client，通过 HTTP 连接远程或本地 MCP server）⑤ Web 端（React/Vue 调用 MCP HTTP 接口）无缝复用。",
+    "web 端优先策略：首先交付 Web 版（React + Vite，调用 MCP HTTP server），用 PWA Manifest + Service Worker 让用户可「安装到桌面」而无需任何打包，验证 UX 与核心功能后再逐步交付原生壳。这最大化早期迭代速度。",
+    "CLI 分发：使用 Bun --compile --bytecode 打包 CLI 为单二进制（支持 macOS arm64/x64、Linux x64/arm64、Windows x64），无需用户安装 Node.js/Bun。在 GitHub Releases 上传各平台产物并配合 install.sh 一键安装脚本，参考 Claude Code 分发方式。",
+    "桌面壳选型：团队纯 TypeScript/JavaScript → 优先 Electrobun（Bun 运行时，包体小，无需 Rust）；需要 iOS/Android 未来扩展或更成熟插件生态 → 选 Tauri 2.0（需学习 Rust，但 tauri-plugin-* 生态完善，官方应用商店分发指南齐全）；已有 Go 代码 → 考虑 Wails v3。避免 Electron 用于新项目，除非团队强依赖 Node.js native addon 或需要超大型应用窗口管理。",
+    "VSCode 扩展：使用 Chat Participants API 将 Agent 接入 Copilot Chat（@your-agent 触发），通过 Language Model API 复用用户已有的 Copilot 订阅，用 MCP dev guide 将内核 MCP server 注册进 VSCode。避免重造聊天 UI，直接融入 VSCode Chat 面板。",
+    "Chrome 扩展（MV3 合规）：background service worker 作为消息路由层，通过 WebSocket 连接本地 MCP server（保持 service worker 存活），content script 负责页面上下文注入与 DOM 操作，side panel 承载主 UI（比 popup 更适合 Agent 交互）。注意：MV3 禁止 eval/远程 JS，所有推理必须在页面内通过 Prompt API 或调用外部 API 完成，不可动态加载模型代码。",
+    "本地 LLM 推理集成：桌面端优先使用 llama.cpp/ollama 作为本地推理后端，通过 MCP server 封装对外暴露；浏览器扩展端关注 Chrome Prompt API（Gemini Nano，Origin Trial 中）与 Transformers.js（WebGPU 加速，可直接在扩展 offscreen document 中运行 ONNX/GGUF 小模型）。",
+    "多平台统一身份与数据同步：跨 CLI/桌面/扩展共享用户配置时，推荐将配置文件存储在 `~/.config/your-agent/` 下（XDG 标准），CLI 和桌面直接读写，Chrome 扩展通过本地 MCP server 中转读取，避免各端状态割裂。"
+  ],
+  "caveats": [
+    "Tauri 系统 WebView 陷阱：macOS WKWebView、Windows WebView2、Linux WebKit2GTK 的 CSS/JS 兼容性存在差异（尤其是 Linux GTK 版本偏旧），需针对每个平台测试 Web 渲染，flex/grid/部分 CSS 特性可能行为不一致。建议在 CI 中加入三平台截图对比。",
+    "MV3 Service Worker 30 秒限制：Chrome 扩展 background service worker 在 30 秒无活动后休眠，无法维持持久连接。规避方案：保持 WebSocket 连接可延长存活，或使用 chrome.alarms API 定期唤醒。若 agent 任务耗时较长，需设计好状态持久化与恢复机制。",
+    "Bun --compile Windows 代码签名限制：`--windows-icon` 等 Windows 元数据标志目前不支持跨平台编译（需在 Windows 上运行），在 CI/CD 中需准备 Windows runner 签名。macOS 公证（notarize）同理需要 Apple Developer 账户，Gatekeeper 会拦截未签名二进制。",
+    "MCP 安全风险：MCP 规范尚在快速演进中，prompt injection 攻击、tool poisoning 等安全问题已被研究人员（MCPSecBench，arXiv 2025）记录。对外暴露 MCP server 时务必实现 OAuth 鉴权（MCP 1.1+ 规范要求），并对 tool 调用做权限范围隔离。",
+    "Tauri 移动端成熟度：Tauri 2.0 iOS/Android 支持虽已 GA，但并非所有桌面插件已移植到移动端；文件系统、通知等 API 在移动端行为与桌面差异较大，需分平台实现。对首次接触 Swift/Kotlin 的 JS 团队，调试移动端 crash 的成本不低。",
+    "Chrome Prompt API（Gemini Nano）局限：当前仍在 Origin Trial（Chrome 131-136），API 设计可能变更，无法在 Chrome Web Store 正式发布含该 API 的扩展。且 Gemini Nano 为本地小模型，能力有限，不适合复杂推理任务，适合做轻量前处理/摘要/分类。",
+    "Node.js SEA vs Bun 选择：Node.js SEA 流程繁琐（需 postject 二进制注入），且官方文档显示功能仍在积极开发中，存在 API 不稳定风险。新项目建议直接使用 Bun --compile；若团队有政策限制引入 Bun，可考虑 Node.js SEA 或 nexe（社区维护）。vercel/pkg 已正式废弃，不应在新项目中使用。",
+    "Electrobun 生态风险：框架较新（v1 刚发布），核心开发者数量少，社区生态远不如 Tauri/Electron 成熟。在核心 AI Agent 产品上全押 Electrobun 存在一定的维护风险，建议在非核心工具或 MVP 阶段验证后再决定是否主力使用。"
+  ],
+  "sources": [
+    {
+      "title": "Tauri 2.0 Stable Release",
+      "url": "https://v2.tauri.app/blog/tauri-20/"
+    },
+    {
+      "title": "Tauri 2.0 官方文档",
+      "url": "https://v2.tauri.app/"
+    },
+    {
+      "title": "Bun Single-file Executable 官方文档",
+      "url": "https://bun.sh/docs/bundler/executables"
+    },
+    {
+      "title": "Node.js Single Executable Applications 官方文档",
+      "url": "https://nodejs.org/api/single-executable-applications.html"
+    },
+    {
+      "title": "Deno compile 官方文档",
+      "url": "https://docs.deno.com/runtime/reference/cli/compile/"
+    },
+    {
+      "title": "VS Code Extension Capabilities Overview",
+      "url": "https://code.visualstudio.com/api/extension-capabilities/overview"
+    },
+    {
+      "title": "VS Code Full MCP Spec Support (2025.06)",
+      "url": "https://code.visualstudio.com/blogs/2025/06/12/full-mcp-spec-support"
+    },
+    {
+      "title": "VS Code MCP Developer Guide",
+      "url": "https://code.visualstudio.com/api/extension-guides/ai/mcp"
+    },
+    {
+      "title": "VS Code AI Agents 特性页",
+      "url": "https://code.visualstudio.com/features/agents"
+    },
+    {
+      "title": "Chrome Extensions What's New",
+      "url": "https://developer.chrome.com/docs/extensions/whats-new"
+    },
+    {
+      "title": "Chrome Extensions MV3 迁移说明",
+      "url": "https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3"
+    },
+    {
+      "title": "Wails v3 官方文档",
+      "url": "https://v3.wails.io/"
+    },
+    {
+      "title": "Electrobun 官方文档",
+      "url": "https://blackboard.sh/electrobun/docs/"
+    },
+    {
+      "title": "web-to-desktop-framework-comparison（GitHub）",
+      "url": "https://github.com/Elanis/web-to-desktop-framework-comparison"
+    },
+    {
+      "title": "Tauri vs Electron 2026 对比分析",
+      "url": "https://tech-insider.org/tauri-vs-electron-2026/"
+    },
+    {
+      "title": "Microsoft Semantic Kernel Agent Framework",
+      "url": "https://learn.microsoft.com/semantic-kernel/frameworks/agent/"
+    },
+    {
+      "title": "MCPSecBench: MCP 安全基准（arXiv）",
+      "url": "https://arxiv.org/pdf/2508.13220"
+    },
+    {
+      "title": "Transformers.js in Chrome Extension（Hugging Face）",
+      "url": "https://huggingface.co/blog/transformersjs-chrome-extension"
+    },
+    {
+      "title": "Improving Single Executable Application Building for Node.js（Joyee Cheung）",
+      "url": "https://joyeecheung.github.io/blog/2026/01/26/improving-single-executable-application-building-for-node-js/"
+    },
+    {
+      "title": "Deno Build Cross-Platform CLI in 5 minutes",
+      "url": "https://deno.com/blog/build-cross-platform-cli"
+    }
+  ]
+}

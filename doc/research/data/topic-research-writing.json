@@ -1,0 +1,219 @@
+{
+  "topic": "Deep Research 与写作 Agent 技术（2025-2026 SOTA 调研）",
+  "summary": "2025-2026 年，Deep Research Agent 从单轮 RAG 问答进化为具备自主规划、并行 fan-out 搜索、事实核查与长文综合能力的多智能体系统。核心模式收敛为「Plan → Fan-out Search → Read → Reflect → Verify → Synthesize」闭环，商业产品（OpenAI Deep Research、Google Gemini Deep Research、Anthropic 多智能体研究系统、Perplexity Deep Research）与学术开源系统（STORM、GPT-Researcher、LangChain open_deep_research、DeepResearcher-RL）均以此为骨架，差异主要体现在并行度控制、token 预算管理、引用核验严格程度和训练方式（prompt engineering vs. RL in real-world）。最新学术趋势聚焦于：通过强化学习（GRPO/PPO）在真实 Web 环境端到端训练 agent（DeepResearcher、O-Researcher、IntentRL）、verification-centric 数据合成与推理时自验证（Marco DeepResearch）、以及评测基准建设（DREAM、ReportBench、DEER、DeepResearchEval）。当前最大瓶颈仍为幻觉（statement hallucination + citation hallucination）、检索召回率低（最优 agent 仅检索到专家引用的 20.92%）、以及高 token 消耗（多 agent 相比单次对话消耗约 15×）。",
+  "sota_techniques": [
+    {
+      "name": "Orchestrator-Subagent 多智能体架构（Anthropic 内部系统）",
+      "description": "LeadResearcher（Opus 4）负责规划与综合，动态生成 Sonnet 4 子代理并行执行具体检索任务，任务完成后由 CitationAgent 负责来源标注。简单查询 1 个子代理，复杂研究可达 10+ 并行子代理，与单代理 Opus 4 相比性能提升 90.2%，token 消耗约为聊天的 15×。Token 用量可解释 BrowseComp 基准 95% 的性能方差。",
+      "maturity": "生产级（Anthropic 内部使用，2025 年公开架构细节）",
+      "projects": "Anthropic Engineering Blog: How we built our multi-agent research system",
+      "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+    },
+    {
+      "name": "OpenAI Deep Research（o3 + 专用推理优化）",
+      "description": "基于 o3 模型的专用变体，采用单强推理 agent 模式：单个强推理模型完成全程研究，辅以定制 o3-mini 做 chain-of-thought 摘要。可读取用户上传文件并执行 Python 代码分析数据，可处理数百个在线来源。核心是 Plan→Search→Read→Reflect→Iterate→Synthesize 大循环，通过长推理链决定何时 pivot 方向。",
+      "maturity": "生产级（2025 年 2 月发布，ChatGPT Pro/Plus 可用）",
+      "projects": "OpenAI Deep Research System Card",
+      "url": "https://cdn.openai.com/deep-research-system-card.pdf"
+    },
+    {
+      "name": "Google Gemini Deep Research / Deep Research Max",
+      "description": "基于 Gemini 2.5 Pro（1M token 上下文），标准版约执行 80 次搜索查询（50-70% token 缓存命中），Max 版约 160 次深度分析。通过 Interactions API 暴露，支持 background=True 异步执行、流式增量更新（thought/text/image 事件）、collaborative_planning 协作规划工作流、MCP Server 接入私有数据。Grounding 工具：Google Search、URL Context、Code Execution、File Search。",
+      "maturity": "生产级（API 开放，2026 年 4 月版本 deep-research-preview-04-2026）",
+      "projects": "Gemini Deep Research Agent API 文档",
+      "url": "https://ai.google.dev/gemini-api/docs/interactions/deep-research"
+    },
+    {
+      "name": "LangChain open_deep_research（Supervisor-Researcher 架构）",
+      "description": "基于 LangGraph 构建的开源框架，三阶段：Scope（澄清研究范围）→ Research（supervisor 将任务拆解为独立 subtopic，并行派发多个 researcher 子代理，每个子代理用独立上下文窗口避免污染，完成后做子问题级 LLM 精炼）→ Write（单次 LLM 综合所有子代理结果生成报告）。支持 human-in-the-loop 审批研究计划。支持 Tavily、Anthropic、OpenAI、Perplexity、Exa、PubMed 等多种模型和搜索工具，Deep Research Bench 排行榜第 6（RACE=0.4344）。",
+      "maturity": "成熟开源（MIT 许可，2025 年 7 月发布）",
+      "projects": "github.com/langchain-ai/open_deep_research",
+      "url": "https://github.com/langchain-ai/open_deep_research"
+    },
+    {
+      "name": "GPT-Researcher（assafelovic）",
+      "description": "最早的开源 deep research agent 之一，Planner+Execution 双 agent 架构：Planner 生成研究子问题列表，Execution agents 并行检索各子问题，最终 Planner 过滤聚合生成带引用报告。平均研究任务约 3 分钟，成本约 $0.005。支持 MCP 集成、LangGraph 流程编排、本地与 Web 双模式。星标 27.5k+。",
+      "maturity": "成熟开源（持续活跃维护，2023 年起至今）",
+      "projects": "github.com/assafelovic/gpt-researcher",
+      "url": "https://github.com/assafelovic/gpt-researcher"
+    },
+    {
+      "name": "STORM（Stanford OVAL）—多视角对话驱动写作",
+      "description": "将长文撰写分为 pre-writing（大纲生成）和 writing 两阶段。通过模拟多位专家视角的对话（Writer 与 Expert 交替提问追问），从互联网检索来源，生成结构化大纲，再产出带 inline citations 的 Wikipedia 风格长文。NAACL 2024 发表，直接影响了商业 deep research 产品设计。",
+      "maturity": "成熟开源（MIT，GitHub 70,000+ 用户）",
+      "projects": "github.com/stanford-oval/storm",
+      "url": "https://github.com/stanford-oval/storm"
+    },
+    {
+      "name": "DeepResearcher（GAIR-NLP）—RL in Real-World",
+      "description": "首个在真实 Web 环境中通过端到端强化学习训练 deep research agent 的框架（EMNLP 2025）。解决了 prompt engineering 脆弱性和 RAG 受控环境局限。相比 prompt engineering 基线提升 28.9 分，比 RAG-RL 提升 7.2 分。RL 训练涌现的行为：跨源交叉验证、自我反思与方向修正、信息不足时诚实承认。",
+      "maturity": "学术前沿（EMNLP 2025 正式录用，代码开源）",
+      "projects": "github.com/GAIR-NLP/DeepResearcher",
+      "url": "https://arxiv.org/abs/2504.03160"
+    },
+    {
+      "name": "Marco DeepResearch（Alibaba）—Verification-Centric 设计",
+      "description": "三层 verification-centric 框架：(1) QA 数据合成时通过 graph-based + agent-based 验证机制控制问题难度并确保答案唯一正确；(2) 轨迹构建时注入显式验证模式；(3) 推理时 agent 自身充当 verifier（test-time scaling）。8B 规模在 BrowseComp/BrowseComp-ZH 上以 600 次工具调用上限超越多个 30B 规模 agent（如 Tongyi DeepResearch）。",
+      "maturity": "学术前沿（arXiv 2603.28376，Alibaba 国际电商）",
+      "projects": "arxiv.org/abs/2603.28376",
+      "url": "https://arxiv.org/abs/2603.28376"
+    },
+    {
+      "name": "IntentRL（用户意图主动澄清 RL）",
+      "description": "解决 deep research 的「自主-交互两难」：高自主 agent 在模糊查询上会产生漫长且不令人满意的执行。引入 shallow-to-deep 意图精炼图（intent refinement graph）从少量 seed 扩展高质量对话轮，两阶段 RL：Stage I 在离线对话上训练通用交互行为，Stage II 通过用户模拟器在线 rollout 增强多样反馈适应性。",
+      "maturity": "学术前沿（arXiv 2602.03468，2026 年初）",
+      "projects": "arxiv.org/abs/2602.03468",
+      "url": "https://arxiv.org/abs/2602.03468"
+    },
+    {
+      "name": "Agentic RAG（检索增强生成的智能体化）",
+      "description": "将传统 RAG 升级为具备规划、反思和多智能体协作的系统。关键改进：动态查询重写（query rewriting）、迭代检索（iterative retrieval）、检索后反思（post-retrieval reflection）、多跳推理。SoK 综述（arXiv 2603.07379）将其分类为 Single-Agent RAG、Multi-Agent RAG、Hierarchical RAG 三大范式。与 deep research 核心流程高度重叠。",
+      "maturity": "成熟学术+工程实践（2025 年多篇综述）",
+      "projects": "github.com/asinghcsu/AgenticRAG-Survey; arxiv.org/abs/2501.09136",
+      "url": "https://arxiv.org/abs/2501.09136"
+    },
+    {
+      "name": "Language Agent Tree Search (LATS) / Reflective-MCTS",
+      "description": "将 Monte Carlo Tree Search 引入语言 agent 规划：LATS 将推理轨迹作为 tree node，用 LM 驱动价值函数和自反思进行树搜索，HotPotQA 上将 ReAct 的幻觉率从 14% 降至 6%。Reflective-MCTS（R-MCTS）加入对比反思和多 agent 辩论做状态评估，在 VisualWebArena 上相比上代提升 6-30%。适合需要深度规划的 research 子任务。",
+      "maturity": "学术前沿进入工程实践（2024-2025 年）",
+      "projects": "arxiv.org/abs/2310.04406 (LATS); arxiv.org/abs/2410.02052 (R-MCTS)",
+      "url": "https://arxiv.org/abs/2310.04406"
+    },
+    {
+      "name": "MCP（Model Context Protocol）驱动的工具层",
+      "description": "Anthropic 主导的开放协议，将工具/数据源统一封装为 MCP Server，agent 通过标准协议动态发现和调用工具，无需为每个集成写定制代码。已成为 deep research agent 工具层事实标准：Gemini Deep Research API、LangChain open_deep_research、GPT-Researcher 均原生支持。2025 年「MCP is all you need」成为 agent 工具层设计哲学。",
+      "maturity": "快速成熟（2024 年底发布，2025 年广泛采用）",
+      "projects": "modelcontextprotocol.io; thealliance.ai/blog/building-a-deep-research-agent-using-mcp-agent",
+      "url": "https://thealliance.ai/blog/building-a-deep-research-agent-using-mcp-agent"
+    },
+    {
+      "name": "评测基准体系（DREAM/ReportBench/DEER/DeepResearchEval）",
+      "description": "2025 年涌现出多套专用评测框架：DREAM（arXiv 2602.18940）用 agentic metrics 评估深度研究；ReportBench（arXiv 2508.15804）用学术综述任务评估；DEER（arXiv 2512.17776）专注专家报告可靠性；DeepResearchEval（arXiv 2601.09688）自动化任务构建与 agentic 评估；DRBench 提供 100 个 PhD 级任务配 RACE（报告质量）和 FACT（引用准确率）两套指标。",
+      "maturity": "学术前沿（2025-2026 年集中发布）",
+      "projects": "arxiv.org/abs/2602.18940; arxiv.org/abs/2508.15804; arxiv.org/abs/2512.17776",
+      "url": "https://arxiv.org/abs/2602.18940"
+    }
+  ],
+  "recommendations_for_user": [
+    "架构选型优先 Orchestrator-Subagent 模式：使用强模型（Claude Opus 4 / GPT-4o）做 LeadResearcher 负责规划与综合，用成本低的模型（Sonnet / GPT-4o-mini）做并行子代理负责检索与摘要。这是性价比最高的设计，Anthropic 数据表明比单 agent 性能提升 90%+，且子代理隔离上下文窗口避免污染。",
+    "工具层全面接入 MCP：不要硬编码各种 search/scrape API，而是将 Tavily、Exa、Firecrawl、GitHub、数据库等都包装成 MCP Server，agent 动态发现和调用。这样新增数据源只需添加新 MCP Server，不需要修改 agent 代码。LangChain open_deep_research 和 GPT-Researcher 均已验证此模式。",
+    "Human-in-the-loop 置于研究计划审批环节：在 fan-out 真正执行（消耗大量 token 和时间）之前，先让用户审批研究计划（subtopics 列表）。LangChain open_deep_research 的三阶段设计（Scope→Research→Write）是可直接复用的蓝图。网页端可用流式 UI 实时展示规划过程，降低用户等待焦虑。",
+    "网页端技术栈推荐 Next.js + Vercel AI SDK + LangGraph：Next.js API Routes 提供后端 agent 执行环境，Vercel AI SDK 处理 streaming UI 状态（useChat/useCompletion hooks），LangGraph 管理 agent 的有状态工作流（fan-out 并行分支 + fan-in 综合节点）。Next.js 16.2 已原生增强 AI agent 支持（AGENTS.md、@vercel/next-browser）。",
+    "引用核验必须作为独立阶段（CitationAgent）实现：不要依赖 LLM 自动生成引用——statement hallucination（内容偏离来源）和 citation hallucination（捏造引用）是所有商业系统的共同痛点。需为每条重要声明存储 source chunk 指针，综合阶段后由专门的 CitationAgent 做句级可溯源验证（FACTUM 论文 arXiv 2601.05866 提供机制参考）。",
+    "Token 预算管理与成本控制：多 agent 系统消耗约为单次对话的 15×，需实现动态 token 预算分配（搜索 vs. 推理的 tradeoff）、任务复杂度自适应子代理数量（简单查询 1 个，复杂研究 10+）、以及 prompt caching（Gemini Deep Research 标准版可达 50-70% 缓存命中率）。参考 DeepPlanner 的 entropy-guided token-level shaping 思路控制规划阶段 token 浪费。",
+    "异步执行 + 流式反馈是网页端体验关键：deep research 任务通常需要 3-60 分钟，必须采用 background=True 异步模式，配合 Server-Sent Events 或 WebSocket 向前端推送实时进展（thought 事件、搜索进度、子报告片段）。参考 Gemini Interactions API 的 stream=True + thought/text/image 增量事件设计，让用户感知到 agent 正在工作。",
+    "开源优先快速验证，商业 API 做高质量生产：个人 agent 项目建议先用 LangChain open_deep_research 或 GPT-Researcher 搭建骨架验证流程（MIT 许可，支持替换 LLM），核心综合环节接入 Claude Opus 4 或 GPT-4o（强推理能力决定报告质量）。规模化后再考虑 Gemini Deep Research API（直接 Interactions API 调用，省去工程复杂度）或 Perplexity Advanced Deep Research API（针对新闻/实时信息场景）。"
+  ],
+  "sources": [
+    {
+      "title": "Anthropic: How we built our multi-agent research system",
+      "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+    },
+    {
+      "title": "OpenAI: Introducing deep research",
+      "url": "https://openai.com/index/introducing-deep-research/"
+    },
+    {
+      "title": "OpenAI Deep Research System Card (PDF)",
+      "url": "https://cdn.openai.com/deep-research-system-card.pdf"
+    },
+    {
+      "title": "Google AI: Gemini Deep Research Agent API 文档",
+      "url": "https://ai.google.dev/gemini-api/docs/interactions/deep-research"
+    },
+    {
+      "title": "LangChain Blog: Open Deep Research",
+      "url": "https://www.langchain.com/blog/open-deep-research"
+    },
+    {
+      "title": "GitHub: langchain-ai/open_deep_research",
+      "url": "https://github.com/langchain-ai/open_deep_research"
+    },
+    {
+      "title": "GitHub: assafelovic/gpt-researcher",
+      "url": "https://github.com/assafelovic/gpt-researcher"
+    },
+    {
+      "title": "GitHub: stanford-oval/storm",
+      "url": "https://github.com/stanford-oval/storm"
+    },
+    {
+      "title": "arXiv: DeepResearcher - Scaling Deep Research via RL in Real-world Environments (2504.03160)",
+      "url": "https://arxiv.org/abs/2504.03160"
+    },
+    {
+      "title": "arXiv: Marco DeepResearch - Verification-Centric Design (2603.28376)",
+      "url": "https://arxiv.org/abs/2603.28376"
+    },
+    {
+      "title": "arXiv: IntentRL - Training Proactive User-intent Agents via RL (2602.03468)",
+      "url": "https://arxiv.org/abs/2602.03468"
+    },
+    {
+      "title": "arXiv: O-Researcher - Multi-Agent Distillation and Agentic RL (2601.03743)",
+      "url": "https://arxiv.org/abs/2601.03743"
+    },
+    {
+      "title": "arXiv: Deep Research - A Survey of Autonomous Research Agents (2508.12752)",
+      "url": "https://arxiv.org/abs/2508.12752"
+    },
+    {
+      "title": "arXiv: Agentic RAG Survey (2501.09136)",
+      "url": "https://arxiv.org/abs/2501.09136"
+    },
+    {
+      "title": "arXiv: Why Your Deep Research Agent Fails - Hallucination Evaluation (2601.22984)",
+      "url": "https://arxiv.org/abs/2601.22984"
+    },
+    {
+      "title": "arXiv: FACTUM - Citation Hallucination Detection in Long-Form RAG (2601.05866)",
+      "url": "https://arxiv.org/abs/2601.05866"
+    },
+    {
+      "title": "arXiv: Can Deep Research Agents Retrieve and Organize? (2601.12369)",
+      "url": "https://arxiv.org/abs/2601.12369"
+    },
+    {
+      "title": "arXiv: DREAM - Deep Research Evaluation with Agentic Metrics (2602.18940)",
+      "url": "https://arxiv.org/abs/2602.18940"
+    },
+    {
+      "title": "arXiv: ReportBench - Evaluating Deep Research Agents (2508.15804)",
+      "url": "https://arxiv.org/abs/2508.15804"
+    },
+    {
+      "title": "arXiv: Language Agent Tree Search LATS (2310.04406)",
+      "url": "https://arxiv.org/abs/2310.04406"
+    },
+    {
+      "title": "Microsoft Azure AI: Building Enterprise-Grade Deep Research Agents In-House",
+      "url": "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/building-enterprise-grade-deep-research-agents-in-house-architecture-and-impleme/4435256"
+    },
+    {
+      "title": "The AI Alliance: Building a Deep Research Agent Using MCP-Agent",
+      "url": "https://thealliance.ai/blog/building-a-deep-research-agent-using-mcp-agent"
+    },
+    {
+      "title": "GitHub: GAIR-NLP/DeepResearcher",
+      "url": "https://github.com/GAIR-NLP/DeepResearcher"
+    },
+    {
+      "title": "Egnyte Blog: Inside the Architecture of a Deep Research Agent",
+      "url": "https://www.egnyte.com/blog/post/inside-the-architecture-of-a-deep-research-agent"
+    },
+    {
+      "title": "Next.js Blog: Building Next.js for an agentic future",
+      "url": "https://nextjs.org/blog/agentic-future"
+    }
+  ],
+  "caveats": [
+    "幻觉双重形式：statement hallucination（生成内容偏离引用来源的实际内容）和 citation hallucination（引用链接/作者名/年份被捏造）在所有商业系统中均存在，包括 OpenAI Deep Research（引用准确率约 78%）和 Claude with Search（约 94%）。RAG 并不消除幻觉，检索增强工具的幻觉率仍可高达 33%，且在 agentic 多跳场景中错误会级联传播。",
+    "检索召回率瓶颈严重：即使是最佳 agent，在 TaxoBench 基准上也只能检索到专家引用文献的 20.92%。组织能力同样薄弱：模型生成的分类体系中 75.9% 存在兄弟节点重叠、51.2% 违反 MECE 原则、83.4% 层级不平衡，与人类专家对齐度仅 28-29%（人类注释者组间对齐为 47-58%）。",
+    "token 消耗与成本：多 agent 系统相比单次对话消耗约 15× token，Google Gemini Deep Research Max 版约执行 160 次搜索，单次研究任务成本不容忽视。token 预算的搜索-推理 tradeoff 尚无成熟自动化方案，固定 budget 分配会导致次优结果。",
+    "文档分块（chunking）是隐性瓶颈：fixed-size 分块破坏语义完整性，semantic chunking 在真实文档上不稳定且计算成本高，两者均会影响 RAG 的召回质量。对于法律/学术等结构化长文档，需要专门的文档解析层。",
+    "RL 训练成本高、数据难获取：DeepResearcher/O-Researcher/IntentRL 等 RL 方法效果显著，但需要大量高质量 trajectory 数据和真实 Web 交互环境，个人开发者难以复现训练过程，只能使用其发布的预训练权重或蒸馏到更小模型。",
+    "商业 deep research API 的数据隐私风险：向 Gemini Deep Research API、Perplexity、OpenAI 等提交的研究查询和上传文档可能被用于模型训练或被记录。对于涉及竞争敏感信息的个人/企业研究场景，应优先考虑本地部署（langchain-ai/local-deep-researcher）或自建 agent 配合本地 LLM。",
+    "长任务超时与中间状态管理：deep research 任务通常执行 3-60 分钟，Gemini API 上限 60 分钟。网页端必须实现可靠的任务持久化（状态存入数据库）、断点续研（checkpoint）、以及前端重连后状态恢复机制，否则网络波动会导致研究结果丢失。",
+    "评测标准不统一：各家系统用不同基准（BrowseComp、RACE、FACT、DREAM、ReportBench）汇报性能，横向对比困难。同一系统在不同基准上排名差异极大，选型时需根据自身实际用例（实时信息 vs. 学术综述 vs. 商业分析）选择对应基准结果参考。"
+  ]
+}

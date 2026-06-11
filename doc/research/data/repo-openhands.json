@@ -1,0 +1,142 @@
+{
+  "architecture": {
+    "agent_loop": "核心 agent 主循环不在本仓，而在外部依赖 openhands-sdk==1.26.0（pyproject.toml 声明），在每个沙箱内的 agent-server 进程里运行。本仓 app_server 作为编排层：通过 AppConversationStartTask 异步状态机（app_conversation_models.py 的 AppConversationStartTaskStatus：WAITING_FOR_SANDBOX→PREPARING_REPOSITORY→RUNNING_SETUP_SCRIPT→SETTING_UP_GIT_HOOKS→SETTING_UP_SKILLS→STARTING_CONVERSATION→READY）拉起沙箱、克隆仓库、装配 Agent，再 POST 到沙箱内 agent-server 的 /api/conversations 启动真正的 think-act-observe 循环。事件以 event stream 形式由 agent-server 产生，app_server 通过反向代理 {agent_server_url}/api/conversations/{id}/events 暴露给前端（app_conversation_router.py:552）。这是一种『编排器/执行器分离』的双层 agent 架构。",
+    "tool_system": "工具集由 SDK 的 preset 提供，在 live_status_app_conversation_service.py:1604-1618 装配：默认 get_default_tools(enable_browser=True, enable_sub_agents=...)，规划模式用 get_planning_tools(plan_path)。运行时还可叠加 MCP 工具（fastmcp，stdio/HTTP servers，见 skills/default-tools.md 用 mcp-server-fetch）、内置 SwitchLLMTool（多 profile 时注入）。工具是 Pydantic 化的 action/observation，前端有对应 type-guard（frontend/src/types/v1/core/base/action.ts、observation.ts）。",
+    "context_memory": "采用 condenser（上下文压缩）：app_conversation_service_base.py:_create_condenser 构造 LLMSummarizingCondenser（SDK 默认 max_size=240, keep_first=2，可由 condenser_max_size 覆盖），为 DEFAULT/PLAN agent 用独立 usage_id（condenser / planning_condenser）便于成本归因。另有 resume 机制：render_resume_transcript + 本仓的 ACP resume 裁剪（_ACP_RESUME_MAX_EVENTS=200、总块 60k 字符、逐条裁剪），含 _sanitize_paths/_strip_terminal_boilerplate 去噪，把历史事件压成 bootstrap prompt 重注入。",
+    "provider_abstraction": "基于 litellm==1.84.1 统一抽象（utils/llm.py），模型发现走 litellm 内置 catalogue + 可选 Bedrock + 可选 Ollama（default_llm_model_service.py）。支持 OpenHands 托管代理（openhands/ 或 litellm_proxy/ 前缀映射）与 BYOR（自带 key）两条路径，base_url 解析逻辑见 resolve_llm_base_url。LLM 以 SDK 的 LLM 对象建模，带 usage_id 维度计量（MetricsSnapshot）。",
+    "execution_sandbox": "多后端沙箱抽象（sandbox/sandbox_service.py 的 SandboxService ABC + Injector 模式）：DockerSandboxService（本地 docker，自动找空闲端口映射、host/bridge 网络、可选 /dev/kvm 透传、tini init）、process（本地进程）、remote（远程 API）。每沙箱暴露 4 个命名端口：AGENT_SERVER(8000)、VSCODE(8001)、WORKER_1/2(8011/8012)。生命周期含 start/resume/pause/delete + wait_for_sandbox_running（轮询 /alive 健康检查）+ pause_old_sandboxes（按 max_num_sandboxes LRU 暂停旧沙箱）。会话 API key 经环境变量 OH_SESSION_API_KEYS_0 注入，webhook 回调走 host.docker.internal。",
+    "session_persistence": "可插拔 store：SQLAppConversationInfoService（SQLAlchemy+asyncpg，Alembic 迁移在 app_lifespan/alembic/versions）与 file_* 变体；file_store 抽象支持 local/memory/S3/google_cloud。会话元数据用 AppConversationInfo（含 parent/sub_conversation_ids、metrics、tags、pr_number）。轨迹可导出为 zip（/{id}/download，含全部 events + metadata）。设置/密钥同样有 file 与 SQL 双实现。",
+    "permission_security": "三层：(1) 确认策略 ConfirmationPolicy（NeverConfirm/AlwaysConfirm/ConfirmRisky），由 confirmation_mode + security_analyzer 组合选择（_select_confirmation_policy）；(2) LLMSecurityAnalyzer（对工具调用做风险评估，confirm risky 才暂停）；(3) 沙箱隔离 + session_api_key（base62 32 字节随机）+ 按 sandbox 维度的 secrets store（StaticSecret/LookupSecret，validate_secret_name 校验）。密钥在 resume transcript 中经 redact_text_secrets/redact_api_key_literals 脱敏。CORS 严格白名单（OH_ALLOW_CORS_ORIGINS_n）。",
+    "prompt_engineering": "system_message_suffix 注入机制：PLAN agent 强制前置 PLANNING_AGENT_INSTRUCTION（禁止『Ready to proceed?』、引导 Build 按钮）；注入 <HOST> web_url 上下文。知识/工作流靠 microagents/skills（Markdown+frontmatter，triggers 关键词或 / 斜杠命令触发，KeywordTrigger/TaskTrigger）。AGENTS.md（27KB 项目级 agent 指令）+ .openhands/microagents（项目级）。",
+    "multi_agent": "支持子会话（parent_conversation_id/sub_conversation_ids，删除父会话级联删子）与子代理（enable_sub_agents → get_registered_agent_definitions()，agent_definitions 注入 ConversationSettings）。PLAN/DEFAULT 双 agent 类型可在会话内切换（前端 Shift+Tab 切换器，Plan→Build 工作流）。但编排深度有限，主要是规划/执行分工与 SDK 内 subagent 委派，非通用 DAG/团队编排。",
+    "extensibility_plugins": "极丰富：(1) Skills/Microagents 5 级合并（public OpenHands/skills 仓 + user ~/.openhands/skills + org {org}/.openhands + project .agents/skills 与 .openhands/microagents + sandbox 暴露 URL），由 agent-server /api/skills 单次聚合（skill_loader.py）；(2) Plugins（PluginSource/PluginSpec，远程 github: 源，带 parameters，运行时合并 skills+MCP）；(3) Hooks（Claude-Code 风格 hooks.json：pre_tool_use/post_tool_use/stop 事件，matcher 通配/正则/精确，command|prompt 类型，hook_loader.py）；(4) MCP（fastmcp，stdio/HTTP）；(5) 可插拔 agent_kind（openhands 原生 vs acp 即 Agent Client Protocol，可挂 Codex 等外部 agent）。",
+    "ui_surface_layers": "多端表层：(1) Local GUI = FastAPI(app.py) + React Router 7 SSR 单页应用（frontend/，SPAStaticFiles 挂载 /，SERVE_FRONTEND 开关）；(2) 内嵌 VS Code（VSCODE 端口 iframe，带 tkn）+ 终端（@xterm）+ Monaco 编辑器 + Browser 面板（base64 PNG 截图流）；(3) CLI/SDK 在独立仓（OpenHands-CLI、software-agent-sdk）；(4) VSCode 扩展（app_server/integrations/vscode）；(5) @openhands/ui 独立设计系统 npm 包（openhands-ui/）；(6) Chrome 扩展（独立仓）。前端栈：React+Zustand+TanStack Query+socket.io+i18next，严格分层 UI→Query hooks→api/ DAL。"
+  },
+  "capability_coverage": {
+    "code": "极强（核心定位）。SWE-bench 77.6，专为 AI 软件工程打造：git 克隆/分支/PR、setup.sh、pre-commit hooks、内嵌 VS Code+终端、文件编辑工具、code-review/fix_test 等技能。这是项目最成熟、最值得借鉴的维度。",
+    "writing": "弱到中。依赖 pypdf/python-docx/python-pptx/pdflatex(skill) 可读写文档，但无专门的长文/富文本写作工作流或编辑器表层；写文章需自行用文件工具+技能拼装。",
+    "research": "中。内置 Tavily MCP 代理（mcp_router init_tavily_proxy）+ mcp-server-fetch + 浏览器抓取，可做网页调研；但无专门的多源核查/引用合成研究管线，需借 microagent 编排。",
+    "computer_use": "中（偏 web 浏览）。enable_browser=True 启用 SDK BrowserToolSet（基于 browsergym-core==0.13.3 + playwright），以 base64 PNG 截图观测 + 动作回放呈现在 Browser 面板（browser-store.ts、browser-snapshot.tsx）。是真正的 web 端 computer-use，但偏浏览器自动化，非全桌面 GUI 控制（无系统级鼠标键盘/多窗口 OS 操作）。",
+    "planning": "中强。一等公民 PLAN agent：独立 planning_condenser、get_planning_tools 写 PLAN.md、强约束 prompt 禁止越权执行、前端 Plan→Build 切换工作流。但偏『软件任务规划』，非通用日历/日常生活规划（无日程/提醒/个人事务集成，那些在 enterprise 集成层如 Linear/Jira）。"
+  },
+  "cross_platform_approach": "采用『一个核心引擎（openhands-sdk，独立仓）+ 多表层复用』策略：agentic 能力全部下沉到可组合的 Python SDK，CLI、Local GUI（本仓）、Cloud、Enterprise、VSCode 扩展、Chrome 扩展都是 SDK 的不同前端。各端通过 agent-server 的统一 REST/event-stream API 与运行时通信，沙箱内同时暴露 agent-server/VSCode/worker 端口，使 web 端能内嵌 IDE 与终端。前端用 React Router 7 SSR 单页应用 + socket.io 实时事件，并抽出 @openhands/ui 设计系统供跨端复用。值得借鉴：把『agent 运行时』与『展示表层』彻底解耦，运行时只暴露事件流 + 命名端口，新端只需消费同一套 API。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app.py",
+      "role": "Web 入口：FastAPI 应用装配，挂载 MCP、v1 路由、健康检查、SPA 静态前端、CORS/限流中间件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/live_status_app_conversation_service.py",
+      "role": "核心编排服务(2522行)：装配 Agent(工具/condenser/MCP/hooks/skills/plugins/安全分析器)、启动会话、ACP resume 裁剪、子会话管理"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/app_conversation_service_base.py",
+      "role": "会话基类：git 克隆/分支、setup.sh、pre-commit hooks 安装、技能合并、condenser 与安全分析器构造"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/sandbox/sandbox_service.py",
+      "role": "沙箱抽象基类(ABC)：start/resume/pause/delete、健康检查轮询、LRU 暂停旧沙箱、Injector 依赖注入"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/sandbox/docker_sandbox_service.py",
+      "role": "Docker 沙箱实现：端口映射、host/bridge 网络、KVM 透传、命名端口(AGENT_SERVER/VSCODE/WORKER)、session key 注入"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/skill_loader.py",
+      "role": "技能/微代理加载：5 级来源(public/user/org/project/sandbox)经 agent-server /api/skills 聚合，触发器分类"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/hook_loader.py",
+      "role": "Claude-Code 风格 hooks.json 加载(pre/post_tool_use/stop，matcher，command|prompt)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/app_conversation_models.py",
+      "role": "会话数据模型：StartTask 异步状态机、PluginSpec、AgentType(DEFAULT/PLAN)、ConversationTrigger、Hook 响应模型"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/app_conversation/app_conversation_router.py",
+      "role": "REST 路由(1532行)：会话 CRUD、events 反向代理到沙箱 agent-server、git diff、skills/hooks 查看、轨迹 zip 导出"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/settings/settings_models.py",
+      "role": "设置模型：agent_kind(openhands/acp 可插拔)、SandboxGroupingStrategy、condenser_max_size、security_analyzer、confirmation_mode"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/frontend/src/components/features/browser/browser.tsx",
+      "role": "Web 端 computer-use 表层：base64 PNG 截图流渲染浏览器观测(配合 browser-store.ts)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/pyproject.toml",
+      "role": "依赖清单：揭示核心引擎是外部 openhands-sdk/tools/agent-server==1.26.0，本仓为编排+表层；litellm/browsergym/fastmcp/playwright 等"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/AGENTS.md",
+      "role": "项目级 agent 指令(27KB)：仓库结构、会话状态管理、微代理机制、前端分层规约——是理解全局心智模型的关键文档"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/skills/default-tools.md",
+      "role": "微代理/技能样例：展示 frontmatter(triggers/agent/mcp_tools) 与 MCP stdio server 声明式集成"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/OpenHands/openhands/app_server/config_api/default_llm_model_service.py",
+      "role": "Provider 抽象：litellm catalogue + Bedrock + Ollama 模型发现"
+    }
+  ],
+  "license": "核心 MIT（根 LICENSE，pyproject.toml license=\\\"MIT\\\"，openhands 与 agent-server Docker 镜像均 MIT）；唯独 enterprise/ 目录为 PolyForm Free Trial License 1.0.0（30 天试用，Copyright 2026 All Hands AI，超期需购买授权）。可借鉴的核心运行时/沙箱/技能/前端全部 MIT，商用友好。",
+  "one_liner": "OpenHands 是以 MIT 开源、SWE-bench 77.6 的 AI 软件工程 agent 平台：核心 agentic 引擎下沉为可组合的 openhands-sdk，本仓提供 Local GUI 编排服务器(app_server)+React 单页前端+沙箱运行时+5 级技能/微代理体系，并以同一引擎支撑 CLI/Cloud/Enterprise/IDE 扩展多端。",
+  "positioning": "面向『AI 驱动软件开发』的全栈平台，对标 Devin/Jules/Claude Code/Codex。差异化在于：彻底的引擎-表层解耦(SDK 内核 + 多前端)、可插拔多后端沙箱(docker/process/remote/k8s)、声明式可组合扩展层(skills+microagents+plugins+hooks+MCP)、规划/执行双 agent，以及 web 端内嵌 VS Code+终端+浏览器的完整开发者表层。对『个人全平台 AI Agent』是高度对齐的参考样板，尤以 runtime 架构与 web 端 computer-use 见长。",
+  "primary_language": "Python 3.12+（后端/运行时编排，约占核心）+ TypeScript/React（前端多端表层）",
+  "repo": "OpenHands/OpenHands（本地路径 /Users/fsm/project/arclightagent/OpenHands；核心引擎在姊妹仓 OpenHands/software-agent-sdk，CLI 在 OpenHands/OpenHands-CLI）",
+  "stack": "后端：FastAPI + uvicorn + SQLAlchemy(asyncpg) + Alembic + Pydantic + python-socketio + fastmcp(MCP) + litellm + docker/kubernetes SDK + browsergym/playwright；前端：React + React Router 7(SSR) + Zustand + TanStack Query + socket.io-client + @xterm + Monaco + i18next + Tailwind；打包：Poetry/uv，前端 Vite。运行时沙箱：Docker 容器内运行 agent-server，暴露 agent-server/VSCode/worker 端口。",
+  "standout_techniques": [
+    {
+      "name": "编排器/执行器双层 agent 架构 + 事件流反向代理",
+      "what": "app_server 不直接跑 agent 循环，而是拉起沙箱内的 agent-server(SDK)，通过 REST 启动会话并反向代理其 event stream(app_conversation_router.py:552)。会话启动是异步状态机(AppConversationStartTask)。",
+      "why_borrow": "把『慢启动且需隔离』的运行时与『面向用户的快表层』解耦，天然支持本地/远程/云三态、可观测的启动进度、以及多前端复用同一 API。个人 Agent 跨 web/CLI/桌面时这是最干净的拆分。"
+    },
+    {
+      "name": "多后端可插拔沙箱(SandboxService ABC + Injector)",
+      "what": "统一 start/resume/pause/delete/健康检查接口，docker/process/remote/k8s 多实现；每沙箱暴露命名端口(AGENT_SERVER/VSCODE/WORKER)，LRU 自动暂停旧沙箱控成本，可选 KVM 透传。",
+      "why_borrow": "一套接口适配从『本地 docker』到『云端 k8s』的全谱执行环境，端口命名约定让 web 端能内嵌 IDE/终端/浏览器。个人 Agent 的『安全执行』可直接照搬这套抽象。"
+    },
+    {
+      "name": "5 级技能/微代理合并 + 声明式触发",
+      "what": "skill_loader 把 public(OpenHands/skills 仓)/user(~/.openhands)/org/project(.agents/skills、.openhands/microagents)/sandbox 五来源经 agent-server /api/skills 单次聚合去重；Markdown+frontmatter，KeywordTrigger 关键词或 TaskTrigger /斜杠命令按需注入。",
+      "why_borrow": "把『领域知识/工作流』做成可版本化、可分发、按需触发的 Markdown，避免 system prompt 膨胀。个人 Agent 的『能力扩展』与『写代码/调研/规划』各自挂技能即可，无需改代码。"
+    },
+    {
+      "name": "Claude-Code 风格 Hooks(hooks.json)",
+      "what": "项目级 .openhands/hooks.json 声明 pre_tool_use/post_tool_use/stop 事件钩子，支持 matcher(通配/正则/精确)与 command|prompt 两类、超时与 async(hook_loader.py)。",
+      "why_borrow": "在不改 agent 核心的前提下注入确定性副作用(lint/测试/审计/通知)，是『自动化策略外置』的优雅实现，个人 Agent 的『每次 X 就 Y』需求正好用它。"
+    },
+    {
+      "name": "condenser 上下文压缩 + ACP resume 裁剪",
+      "what": "LLMSummarizingCondenser(max_size/keep_first，按 usage_id 独立计费)做滚动摘要；恢复会话时 render_resume_transcript + 本仓的事件裁剪(200 事件/60k 字符上限、去 pytest 噪声、_sanitize_paths 路径脱敏)把历史压成 bootstrap prompt。",
+      "why_borrow": "长任务/长会话不爆上下文的成熟做法，且压缩与主对话用不同 usage_id 便于成本归因。个人 Agent 的长程记忆与跨 session 续聊可直接借鉴这套裁剪启发式。"
+    },
+    {
+      "name": "可插拔 agent_kind(openhands 原生 vs ACP)",
+      "what": "settings_models 支持 OpenHandsAgentSettings 与 ACPAgentSettings 两种，后者经 Agent Client Protocol 挂接外部 agent(如 Codex)，ACP 事件经 _format_raw_input/_extract_output_text 归一化。",
+      "why_borrow": "一个表层可驱动多种异构 agent 后端，避免锁死单一 agent 实现。个人 Agent 想同时接 Claude/Codex/自研 agent 时，ACP 这种协议化适配层是关键。"
+    },
+    {
+      "name": "规划/执行双 agent + Plan→Build 工作流",
+      "what": "PLAN agent 用独立 planning_condenser、get_planning_tools 写 PLAN.md、强 prompt 约束禁止越权执行；前端提供 Build 按钮一键切到 code agent 执行计划。",
+      "why_borrow": "把『先想后做』产品化：规划阶段只读、产出可审阅的 PLAN.md，再显式授权执行。对『日常规划/写代码』这类需要人类确认的场景非常合适。"
+    },
+    {
+      "name": "web 端 computer-use = 截图流 + 内嵌 IDE",
+      "what": "browser 工具(browsergym+playwright)以 base64 PNG 观测推到前端 browser-store/BrowserSnapshot 渲染；同时沙箱 VSCODE 端口以带 token 的 iframe 内嵌 VS Code，WORKER 端口给 agent 起应用服务器预览。",
+      "why_borrow": "无需 VNC 即可在纯 web 端呈现浏览器自动化与完整 IDE，端口命名 + token 的暴露约定是轻量可复制的 computer-use 方案。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "核心引擎不在本仓：agent 主循环/工具实现/runtime 细节都在外部 openhands-sdk(1.26.0 pip 依赖)，单看本仓无法掌握全貌，二次开发需同时跟踪 software-agent-sdk 仓，耦合于其版本演进。",
+    "重度绑定容器：沙箱默认 docker(本地需 docker daemon)，Docker SDK 调用是同步阻塞(代码注释自承)，DockerSandboxService 用阻塞 API 包在 async 里，高并发下会拖慢事件循环——个人桌面/插件端若想免容器需另写 process/local runtime。",
+    "computer-use 偏浏览器、非全桌面：基于 browsergym+playwright 的截图流只覆盖 web 自动化，没有系统级 GUI 控制(多窗口/OS 原生应用/鼠标键盘坐标操作)，真正的桌面 computer use 需自行补。",
+    "写文章/日常规划是弱项：平台为软件工程优化，长文写作无专门编辑器/工作流，日常生活规划(日程/提醒/邮件)只在 enterprise 集成层且偏团队工具(Jira/Linear/Slack)——个人化场景需大量自建。",
+    "复杂度与体量偏重：app_server 单文件 2522 行(live_status)、强依赖注入/Injector/DiscriminatedUnion、多 store 抽象、SaaS/Enterprise 分叉，启动链路长(7 状态异步任务)，对小团队/个人项目是过度工程，宜取架构思想而非照抄实现。",
+    "enterprise/ 目录非自由软件：PolyForm Free Trial(30 天)许可，集成(GitHub App/Slack/Jira/Linear/Stripe/Keycloak)与多用户/RBAC/计费均在其中，商用复用受限——只能借鉴 MIT 的核心层。",
+    "多仓割裂导致的运维成本：CLI、SDK、docs、benchmarks、chrome-extension 分散在不同仓库，版本协同与端到端调试成本高，个人项目若学其多端策略要权衡这种碎片化。"
+  ]
+}

@@ -1,0 +1,206 @@
+{
+  "topic": "编码 Agent 最先进技术调研 (2025-2026)",
+  "summary": "截至 2026 年中，编码 Agent 已从\"辅助自动补全\"进化为\"全自主软件工程师\"。在 SWE-bench Verified 上，顶级系统（Claude Sonnet 4 + Live-SWE-agent scaffold）已突破 79% 的解决率，比 2023 年底的 1.96% 提升了约 40 倍。技术演进呈现以下主轴：① edit/diff 格式从统一 diff 收敛为 SEARCH/REPLACE block（精确字符串替换），并出现 Script Generation（sed 脚本）作为大文件高效替代方案；② 代码库索引从纯词法检索升级为 tree-sitter AST 解析 + PageRank 图排名 + 嵌入式语义检索的三层混合架构；③ verification loop 形成\"修改→运行测试→读取失败→自校正\"的 ReAct 闭环，并涌现出\"自进化工具合成\"（Live-SWE-agent）这一突破范式；④ LSP 集成从可选增强变成主流，LSAP/ACP 等新协议正在将 IDE 级智能解耦为 Agent 原生能力；⑤ 多 Agent 并行（Claude Code Agent Teams、Codex 多智能体、Windsurf 5 并行）已成为标配，共享任务列表是协调核心；⑥ Autonomous PR（Copilot Coding Agent、Devin 3.0）在 GitHub Actions 沙箱中全流程落地；⑦ 安全沙箱（E2B microVM、Daytona Docker）成为 Web 优先 Agent 的基础设施底座。",
+  "sota_techniques": [
+    {
+      "name": "SEARCH/REPLACE Block 编辑格式",
+      "description": "LLM 以 <<<<<<< SEARCH / >>>>>>> REPLACE 分隔符标记精确字符串替换块，仅输出变更部分，避免重写整个文件。Aider 将其作为默认格式（diff/diff-fenced），并提供容错解析（允许轻微缩进偏差）。对比：统一 diff 使 GPT-4 Turbo 惰性减少 3×；Script Generation（sed 脚本）在 10+ 处修改时比顺序编辑快 6.5×、省 token 3.5×。",
+      "projects": "Aider (https://github.com/Aider-AI/aider)；参考基准文章：https://dev.to/ceaksan/i-benchmarked-5-file-editing-strategies",
+      "maturity": "生产就绪（Aider v0.x~latest 默认使用）",
+      "url": "https://aider.chat/docs/more/edit-formats.html"
+    },
+    {
+      "name": "Unified Diff 编辑格式",
+      "description": "生成标准 patch 文件，通过 patch 命令应用。可逆、标准化。Aider 的 udiff 格式是对原版的简化变体，专门缓解 LLM 用省略注释偷懒的问题。在 GPT-4 Turbo 上将惰性从 12/50 任务降至 4/50，分数提升至 61%。",
+      "projects": "Aider udiff (https://aider.chat/docs/unified-diffs.html)",
+      "maturity": "生产就绪",
+      "url": "https://aider.chat/docs/unified-diffs.html"
+    },
+    {
+      "name": "Tree-sitter + PageRank Repo Map",
+      "description": "Aider 首创的代码库地图算法：① tree-sitter 解析所有源文件为 AST，提取 def/ref 符号标签；② 构建文件级有向图（引用关系加权：用户消息中提及的标识符 ×10、当前对话文件中的引用 ×50、私有名称 ×0.1）；③ 运行 Personalized PageRank 排序；④ 二分搜索在 token 预算内（默认 1024 token，无文件时 ×8）选取最相关符号定义输出给 LLM。实现了用极小 token 消耗传达大型代码库的拓扑关系。",
+      "projects": "Aider RepoMap (https://aider.chat/2023/10/22/repomap.html)；衍生工具 RepoMapper (https://github.com/pdavis68/RepoMapper)；RepoMapper MCP Server；cocoindex realtime-codebase-indexing (https://github.com/cocoindex-io/realtime-codebase-indexing)",
+      "maturity": "生产就绪，被 Cursor 等多工具借鉴",
+      "url": "https://aider.chat/2023/10/22/repomap.html"
+    },
+    {
+      "name": "三层混合检索架构（Lexical + AST + Semantic）",
+      "description": "以 Cline 为代表的三层检索：① ripgrep 词法搜索（速度快、精准）；② tree-sitter AST 结构解析（函数/类边界感知分块）；③ 嵌入式向量语义检索（自然语言查询降级使用）。Cursor 的 Index-First 哲学类似，以结构检索为主、语义检索为辅。研究表明 Cursor 上下文利用率 14.7%，Cline 17.5%。",
+      "projects": "Cline (https://github.com/cline/cline)；Cursor；Zylos Research 报告 (https://zylos.ai/research/2026-04-19-codebase-intelligence-repository-understanding-ai-agents)",
+      "maturity": "生产就绪",
+      "url": "https://zylos.ai/research/2026-04-19-codebase-intelligence-repository-understanding-ai-agents"
+    },
+    {
+      "name": "CodeAct 统一代码动作空间（OpenHands）",
+      "description": "将 LLM 的所有动作收敛到单一代码执行空间（Bash + Python IPython + 浏览器 DSL），而非为每个能力设计专属 JSON 工具。研究表明这是最强的通用 Agent 基线。2025 年 11 月推出 V1 SDK，采用事件溯源状态管理（不可变事件流），支持确定性回放、暂停/恢复和调试。发表于 ICLR 2025。",
+      "projects": "OpenHands (https://github.com/OpenHands/OpenHands)；Software Agent SDK (https://github.com/OpenHands/software-agent-sdk)",
+      "maturity": "生产就绪，ICLR 2025 论文级别",
+      "url": "https://proceedings.iclr.cc/paper_files/paper/2025/file/a4b6ad6b48850c0c331d1259fc66a69c-Paper-Conference.pdf"
+    },
+    {
+      "name": "Agentless 三阶段精简流水线",
+      "description": "反复杂 Agent 哲学：用固定的三阶段流水线替代开放式 ReAct 循环——① Localization（定位相关文件/函数）；② Patch Generation（生成候选补丁）；③ Test-case Generation（验证）。在 SWE-bench Lite 上超越大多数重型 Agent，成本降低一个数量级。代表了'简单流水线 > 复杂规划'的设计信条。",
+      "projects": "Agentless (https://arxiv.org/pdf/2408.03449)；Moatless Tools",
+      "maturity": "研究成熟，已被多个工业系统采纳",
+      "url": "https://arxiv.org/abs/2407.01489"
+    },
+    {
+      "name": "Live-SWE-agent 自进化工具合成",
+      "description": "Agent 从极简 bash scaffold 出发，在运行时动态合成和修改自定义工具（Step Reflection 机制：每步执行后显式提示 Agent 考虑是否创建/修订工具）。无需离线训练/微调，在 SWE-bench Pro 上达到 45.8% 解决率，SWE-bench Verified 达到 79.2%（与 Claude Opus 4.5 协同）。论文：arxiv:2511.13646。",
+      "projects": "Live-SWE-agent (https://arxiv.org/abs/2511.13646)；Live-SWE-agent Leaderboard (https://live-swe-agent.github.io/)",
+      "maturity": "前沿研究，已在 SWE-bench 排行榜生产验证",
+      "url": "https://arxiv.org/abs/2511.13646"
+    },
+    {
+      "name": "ReAct 验证闭环（Plan→Edit→Test→Fix Loop）",
+      "description": "现代编码 Agent 的核心执行范式：推理与执行交替进行。完整循环：上下文收集 → 计划生成 → 审批门控（可选）→ 增量执行 → 运行测试读取失败 → 自校正。GitHub Copilot Coding Agent（2025 年 9 月 GA）在 GitHub Actions 中实现全流程；Devin 3.0 的 PR merge 率从 34% 升至 67%。关键洞察：'迭代循环是 Agent 区别于 Assistant 的本质'。",
+      "projects": "GitHub Copilot Coding Agent (https://github.com/orgs/community/discussions/159068)；Devin (https://www.zenml.io/llmops-database/autonomous-software-development-agent-for-production-code-generation)；OpenHands",
+      "maturity": "生产就绪，行业标准",
+      "url": "https://github.com/orgs/community/discussions/159068"
+    },
+    {
+      "name": "LSP 集成与 LSAP（Language Server Agent Protocol）",
+      "description": "Agent 通过 LSP 获取 IDE 级语义能力：goToDefinition、findReferences、hover、documentSymbol、getDiagnostics。Claude Code v2.0.74（2025 年 12 月）原生支持 LSP 插件。每次编辑后语言服务器立即报告类型错误/未定义变量，形成'编辑→诊断→修复'的紧密循环。LSAP（v0.2.0，2026 年 1 月）是更高层抽象：将 LSP 原子操作封装为 Agent 原生的语义指令，返回 Markdown 格式的合并结果，支持文件大纲、引用查找、安全重命名等高级能力。ACP（Agent Client Protocol）将 AI 助手与 IDE 解耦，Zed Editor 于 2025 年 8 月率先实现。",
+      "projects": "LSAP (https://github.com/lsp-client/LSAP)；OpenCode LSP (https://opencode.ai/docs/lsp/)；Claude Code；ACP (https://blog.promptlayer.com/agent-client-protocol-the-lsp-for-ai-coding-agents/)",
+      "maturity": "LSP 集成生产就绪；LSAP v0.2.0 早期活跃开发",
+      "url": "https://github.com/lsp-client/LSAP"
+    },
+    {
+      "name": "多 Agent 并行协作（Agent Teams）",
+      "description": "2026 年 2 月多家厂商同期发布多 Agent 支持：Claude Code Agent Teams（实验特性，Lead+Teammates 架构）、Grok Build（8 并行 Agent）、Windsurf（5 并行）、Codex CLI（集成 OpenAI Agents SDK）。协调机制：共享磁盘上的任务列表文件作为通信层，防止重复工作和文件冲突。成本约为单会话的 3-4×，但复杂任务壁钟时间大幅缩短。",
+      "projects": "Claude Code Agent Teams (https://code.claude.com/docs/en/sub-agents)；VS Code Multi-Agent (https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development)",
+      "maturity": "实验性→早期生产",
+      "url": "https://code.claude.com/docs/en/sub-agents"
+    },
+    {
+      "name": "安全沙箱执行（E2B microVM / Daytona Docker）",
+      "description": "AI Agent 代码执行的基础设施层。E2B：Firecracker microVM，每沙箱独立内核，硬件级隔离，冷启动约 150ms，适合短生命周期任务；Daytona：Docker 容器，冷启动 <90ms，持久化沙箱（支持 auto-stop/archive），支持 GPU，适合跨会话长期任务。两者均开源。选择标准：安全优先 → E2B；持久化+GPU → Daytona。",
+      "projects": "E2B (https://e2b.dev/)；Daytona (https://www.daytona.io/)；Modal；Firecracker",
+      "maturity": "生产就绪，行业标准基础设施",
+      "url": "https://northflank.com/blog/daytona-vs-e2b-ai-code-execution-sandboxes"
+    },
+    {
+      "name": "Terminal-Bench（终端 Agent 基准）",
+      "description": "2025 年 11 月发布的高难度 CLI Agent 评测基准（v2.0），89 个手工验证任务，覆盖科学计算、软件工程、ML 训练、系统管理、安全、数据科学全领域。前沿模型得分均低于 65%，揭示了 LLM 在真实端到端终端任务中的显著短板。配套论文 arxiv:2601.11868。评估框架公开于 tbench.ai。",
+      "projects": "Terminal-Bench (https://arxiv.org/abs/2601.11868)；tbench.ai；Leaderboard (https://llm-stats.com/benchmarks/terminal-bench)",
+      "maturity": "研究基准，活跃维护（v2.1）",
+      "url": "https://arxiv.org/abs/2601.11868"
+    },
+    {
+      "name": "SWE-bench 生态系列评测",
+      "description": "编码 Agent 的核心评测标准。主要变体：SWE-bench Verified（500 人工验证实例，当前最高 79.2%）；SWE-bench Pro（更难，45.8% 为当前 SOTA）；SWE-bench-Live（持续更新真实 GitHub 问题）；SWE-rebench（自动化去污染流水线）；SWE-bench-java-verified（多语言扩展）。顶级工程做法：多 Agent ensemble + LLM-as-judge 投票；精简 localize-repair-validate 流水线；检索增强微调（SWE-Fixer）。",
+      "projects": "SWE-bench (https://www.swebench.com/)；SWE-rebench (https://swe-rebench.com/)；CodeSOTA Leaderboard (https://www.codesota.com/browse/agentic/swe-bench)",
+      "maturity": "学术+工业双重标准",
+      "url": "https://www.swebench.com/"
+    }
+  ],
+  "recommendations_for_user": [
+    "edit/diff 格式选型建议：优先实现 SEARCH/REPLACE block 格式（精确字符串匹配）作为默认编辑工具，搭配容错解析；对大文件（>300 行）且变更点 ≥6 处时降级为 Script Generation（sed 脚本），可节省 3.5× token；始终加装 deterministic edit-guard（行数验证 + 连续编辑计数器 + lost-in-the-middle 检测）作为安全层。",
+    "代码库索引建议：采用 tree-sitter AST 感知分块（保持函数/类完整边界）+ PageRank 图排名作为核心上下文选择算法；向量语义检索作为自然语言查询的降级回退，而非主路径；参考 cocoindex 的增量实时更新方案（只重新处理变更文件），避免全量重建开销。",
+    "Web 优先 Agent 架构建议：使用 E2B（安全优先，微VM 隔离）或 Daytona（需要持久化/GPU 时）作为代码执行沙箱，切勿在宿主进程中直接执行 Agent 生成的代码；前端优先采用 WebMCP 标准暴露结构化工具接口，方便未来浏览器 Agent（Copilot、Comet、Atlas）直接调用；LSP 集成设为早期里程碑，goToDefinition/getDiagnostics 能大幅提升 Agent 编辑精度。",
+    "verification loop 工程建议：ReAct 闭环是 Agent 与 Assistant 的本质边界，必须实现'编辑→运行测试→读取失败→自校正'全闭环；对 Web 端 Agent，可在沙箱内运行单元测试 + playwright/cypress E2E 测试；为 autonomous PR 流程设置 CI 绿灯门控，避免语义破坏下游消费者的隐患；Devin 3.0 经验表明即便最先进系统仍有约 33% 的 PR 需要人工干预，保留 human-in-the-loop 审批门控。",
+    "多 Agent 并行策略：将独立子任务（如同时调研 auth/db/api 模块）分派给并行 subagent，主 Agent 只负责综合；共享任务列表文件（而非直接通信）作为协调层，防止文件冲突；多 Agent 约消耗 3-4× token，仅在任务可明显并行时使用，避免无谓浪费。",
+    "SOTA 模型+脚手架组合：当前最强组合是 Claude Sonnet 4 / Opus 4.5 + Live-SWE-agent scaffold（SWE-bench Verified 79.2%）或 Agentless 三阶段流水线（成本比 Agent 循环低 10×）。建议个人 Agent 项目优先评估 Agentless 流水线（简单、可预测、低成本），在准确率瓶颈时再引入 ReAct 循环或自进化工具合成。",
+    "避坑：SEARCH/REPLACE 块的 SEARCH 部分必须是文件的精确逐字拷贝，不允许包含 +/-/@@等 diff 语法；PageRank repo map 的 token 预算在无打开文件时会自动 ×8 扩展，需设置上限防止超出 context window；Docker 容器沙箱（Daytona）共享宿主内核，存在逃逸风险，不受信任代码应使用 E2B microVM；多 Agent 协作中共享任务列表需原子写操作，否则并发写入会引发竞态。"
+  ],
+  "sources": [
+    {
+      "title": "Aider Edit Formats 官方文档",
+      "url": "https://aider.chat/docs/more/edit-formats.html"
+    },
+    {
+      "title": "Aider Unified Diffs: GPT-4 Turbo 惰性降低 3× 实验",
+      "url": "https://aider.chat/docs/unified-diffs.html"
+    },
+    {
+      "title": "Building a better repository map with tree-sitter (Aider 官方博客)",
+      "url": "https://aider.chat/2023/10/22/repomap.html"
+    },
+    {
+      "title": "I Benchmarked 5 File Editing Strategies for AI Coding Agents (DEV Community)",
+      "url": "https://dev.to/ceaksan/i-benchmarked-5-file-editing-strategies-for-ai-coding-agents-heres-what-actually-works-1855"
+    },
+    {
+      "title": "Inside the Scaffold: A Source-Code Taxonomy of Coding Agent Architectures (arXiv:2604.03515)",
+      "url": "https://arxiv.org/pdf/2604.03515"
+    },
+    {
+      "title": "OpenHands ICLR 2025 论文",
+      "url": "https://proceedings.iclr.cc/paper_files/paper/2025/file/a4b6ad6b48850c0c331d1259fc66a69c-Paper-Conference.pdf"
+    },
+    {
+      "title": "OpenHands GitHub 仓库",
+      "url": "https://github.com/OpenHands/OpenHands"
+    },
+    {
+      "title": "Live-SWE-agent: Can Software Engineering Agents Self-Evolve on the Fly? (arXiv:2511.13646)",
+      "url": "https://arxiv.org/abs/2511.13646"
+    },
+    {
+      "title": "Terminal-Bench: Benchmarking Agents on Hard, Realistic Tasks in CLIs (arXiv:2601.11868)",
+      "url": "https://arxiv.org/abs/2601.11868"
+    },
+    {
+      "title": "SWE-bench 官方排行榜",
+      "url": "https://www.swebench.com/"
+    },
+    {
+      "title": "CodeSOTA SWE-bench Leaderboard",
+      "url": "https://www.codesota.com/browse/agentic/swe-bench"
+    },
+    {
+      "title": "LSAP GitHub 仓库 (Language Server Agent Protocol)",
+      "url": "https://github.com/lsp-client/LSAP"
+    },
+    {
+      "title": "Agent Client Protocol: The LSP for AI Coding Agents (PromptLayer Blog)",
+      "url": "https://blog.promptlayer.com/agent-client-protocol-the-lsp-for-ai-coding-agents/"
+    },
+    {
+      "title": "Claude Code Sub-agents 官方文档",
+      "url": "https://code.claude.com/docs/en/sub-agents"
+    },
+    {
+      "title": "GitHub Copilot Coding Agent GA 公告",
+      "url": "https://github.com/orgs/community/discussions/159068"
+    },
+    {
+      "title": "E2B 官网",
+      "url": "https://e2b.dev/"
+    },
+    {
+      "title": "Daytona vs E2B 沙箱对比 (Northflank)",
+      "url": "https://northflank.com/blog/daytona-vs-e2b-ai-code-execution-sandboxes"
+    },
+    {
+      "title": "Codebase Intelligence 2026 综述 (Zylos Research)",
+      "url": "https://zylos.ai/research/2026-04-19-codebase-intelligence-repository-understanding-ai-agents"
+    },
+    {
+      "title": "realtime-codebase-indexing GitHub 仓库 (CocoIndex)",
+      "url": "https://github.com/cocoindex-io/realtime-codebase-indexing"
+    },
+    {
+      "title": "SWE-rebench 去污染评测流水线",
+      "url": "https://swe-rebench.com/"
+    },
+    {
+      "title": "VS Code Multi-Agent Development 博客 (2026-02)",
+      "url": "https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development"
+    },
+    {
+      "title": "OpenCode LSP 文档",
+      "url": "https://opencode.ai/docs/lsp/"
+    }
+  ],
+  "caveats": [
+    "SEARCH/REPLACE 格式的最常见失败模式：① SEARCH 块包含了 diff 符号（+/-/@@）而非原始代码；② 模型输出省略号（...）代替中间代码（需 edit-guard 检测）；③ Gemini 系列模型需使用 diff-fenced 变体（文件路径放 fence 内部）才能正确遵循格式。",
+    "PageRank repo map 的 token 扩展陷阱：当对话中没有打开文件时，map_tokens 默认乘以 8（约 8192 token），在大型代码库中可能大幅压缩可用上下文窗口，建议显式设置上限。",
+    "SWE-bench 污染风险：部分高分系统可能对测试集过拟合（数据泄露）；SWE-rebench 项目专门构建了自动化去污染流水线，评估新模型时应优先参考 SWE-bench-Live（持续抓取真实 GitHub 新问题）而非静态 Verified 集。",
+    "Docker 沙箱安全边界：Daytona 使用 Docker 容器，多容器共享宿主内核，理论上存在内核漏洞逃逸风险；对不可信 Agent 生成代码，应使用 E2B 的 Firecracker microVM（硬件虚拟化隔离）。",
+    "Devin/Copilot 自主 PR 合并率警示：Devin 3.0 的 PR 合并率约 67%，仍有约 1/3 需要人工重做；autonomous PR 流程必须保留 CI 门控 + 人工 review 步骤，不应全自动 merge。",
+    "LSAP / ACP 协议尚早期：LSAP v0.2.0（2026 年 1 月）仍在活跃开发，Relation API 处于 draft 状态；ACP 尚无广泛 IDE 采纳（仅 Zed + Gemini CLI）。生产系统应优先使用成熟的原生 LSP 集成，而非押注新协议。",
+    "多 Agent 成本非线性：3 个并行 Agent 约消耗 3-4× token，但任务若存在隐式依赖（如两个 Agent 同时修改同一文件），会导致合并冲突和状态不一致；必须在任务分解阶段确认无共享可写状态。",
+    "Terminal-Bench 揭示的能力天花板：即使前沿模型在 SWE-bench Verified 上超过 70%，在真实终端任务（Terminal-Bench）上仍低于 65%，说明'跑通测试'≠'真正理解系统'，不应过度解读 SWE-bench 高分。"
+  ]
+}

@@ -18,3 +18,12 @@ Key routing rules:
 - Architecture review → invoke plan-eng-review
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
+
+## Design System
+Always read DESIGN.md before making any visual or UI decisions.
+All font choices, colors, spacing, and aesthetic direction are defined there.
+Do not deviate without explicit user approval.
+In QA mode, flag any code that doesn't match DESIGN.md.
+Hard rules: hazard red #FF4D2E appears ONLY on approval surfaces; all machine
+output (paths/diffs/terminal/costs) uses Commit Mono; no chat bubbles; no
+blue-black backgrounds; border-radius 0 by default.

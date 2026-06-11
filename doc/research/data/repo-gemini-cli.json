@@ -1,0 +1,190 @@
+{
+  "repo": "https://github.com/google-gemini/gemini-cli",
+  "one_liner": "Google 官方开源的 TypeScript CLI AI Agent，围绕 Gemini API 构建，具备完整 ReAct 循环、工具系统、MCP 集成、A2A 多智能体协议与沙箱执行能力。",
+  "positioning": "这是 Google 为 Gemini 模型打造的\"参考实现级\"开发者 AI Agent CLI，定位对标 Claude Code / GitHub Copilot CLI，但以完全开源方式提供，代码质量达到商业工程标准。其核心价值在于：将企业级 Agent 基础设施（沙箱、钩子、遥测、会话持久化、多 agent 编排）全部开源并可以零成本移植到自研系统中。",
+  "primary_language": "TypeScript (ESM，Node ≥20，monorepo 由 npm workspaces 管理，共 7 个 package)",
+  "stack": "TypeScript / React (ink) / @google/genai SDK / MCP SDK / A2A SDK / Vitest / esbuild / Docker (sandbox)",
+  "license": "Apache-2.0",
+  "cross_platform_approach": "CLI 入口打包为单一 Node.js bundle（esbuild），同时提供 Single Executable Application (SEA) 二进制分发，以及 VS Code 插件 companion package (packages/vscode-ide-companion)。沙箱层按平台分叉：macOS 使用 Seatbelt (sandbox-exec)，Linux 使用 bubblewrap (bwrap)，Docker/Podman 作为通用跨平台沙箱方案。",
+  "architecture": {
+    "agent_loop": "packages/core/src/core/turn.ts 中的 Turn 类实现最内层循环：对 GeminiChat.sendMessageStream 做 async generator 包装，按事件枚举 (GeminiEventType) 依次 yield Content / Thought / ToolCallRequest / ToolCallResponse / Finished / Error 等事件；外层 local-executor.ts 中的 LocalAgentExecutor 驱动多轮迭代（最多 maxTurns=20），每轮调用 Turn.run()，收集 ToolCallRequest 后交 Scheduler 并行执行，再将结果追加到 chat history 循环推进，直到模型调用 complete_task 工具或达到终止条件。这是标准 ReAct 模式：Reasoning (模型 Thought) → Act (工具调用) → Observe (工具结果反注)。",
+    "tool_system": "三层架构：1) BaseDeclarativeTool + BaseToolInvocation 抽象基类（packages/core/src/tools/tools.ts），定义 execute/shouldConfirmExecute/toolLocations/getDescription 接口；2) ToolRegistry（packages/core/src/tools/tool-registry.ts）统一管理 built-in / DiscoveredTool / DiscoveredMCPTool 三类工具，支持动态发现（toolDiscoveryCommand subprocess）、按 excludeTools 配置过滤、Plan Mode 下的写操作限制；3) Scheduler（packages/core/src/scheduler/scheduler.ts）负责工具调用的并行执行、人工确认拦截（MessageBus 回调）、Policy 检查和 Hook 触发。工具集涵盖：read-file/write-file/edit/glob/grep/ripgrep/ls/shell/web-fetch/web-search/memory/ask-user/agent(subagent)/write-todos/tracker 等 25+ 个内置工具。",
+    "context_memory": "两层记忆体系：1) 运行时上下文管理——packages/core/src/context/contextManager.ts 中的 ContextManager 实现基于 DAG 图（ConcreteNode）的上下文图，通过 PipelineOrchestrator 调度 ContextProcessor 管道对节点进行增量处理（工具输出蒸馏 toolDistillationService、遮蔽 toolOutputMaskingService），超限时触发 ChatCompressionService 自动摘要压缩（packages/core/src/context/chatCompressionService.ts），使用 Gemini Flash Lite 压缩以降低成本；2) 持久记忆——GEMINI.md 文件体系（项目/用户/全局三级），MemoryTool 提供读写入口，HierarchicalMemory 支持结构化层级记忆，MemoryContextManager 按需注入上下文。",
+    "extensibility_plugins": "三条扩展路径：1) Skills（packages/core/src/skills/skillManager.ts）——Markdown 格式的 prompt snippet，按 extension→user→workspace 三级优先级叠加，可通过 activate_skill 工具动态激活；2) MCP（packages/core/src/tools/mcp-client.ts）——完整实现 MCP spec，支持 stdio/SSE/StreamableHTTP/gRPC 四种传输，支持 OAuth2 认证，工具/资源/Prompt 三类 MCP 对象全支持，ToolListChanged 通知动态刷新；3) 发现型工具（DiscoveredTool）——配置 toolDiscoveryCommand 子进程，返回 FunctionDeclaration JSON 数组即可动态注册为工具，适合接入任意外部工具链。",
+    "multi_agent": "packages/core/src/agents/ 实现完整多智能体编排：AgentRegistry 管理 built-in 智能体（GeneralistAgent/CodebaseInvestigatorAgent/CliHelpAgent/BrowserAgent）以及从 ~/.agents/ 目录动态加载的自定义 LocalAgentDefinition；AgentTool（AGENT_TOOL_NAME）作为统一调度入口，支持 local（LocalSubagentInvocation，同进程 ReAct 循环）和 remote（A2AClientManager，通过 Google A2A 协议跨进程/跨网络）两种调用模式，传输支持 JSON-RPC/REST/gRPC；packages/a2a-server/ 提供独立的 A2A HTTP 服务端，可将本 agent 暴露给其他 A2A 客户端调用。",
+    "session_persistence": "packages/core/src/services/chatRecordingService.ts 将每条消息以 JSONL 格式追加写入 ~/.gemini/tmp/<project_hash>/<session_id>.jsonl；支持 --resume 恢复上次会话，支持 --rewind 回滚到指定消息，支持 checkpoints 和 RewindRecord 机制；packages/a2a-server/src/persistence/gcs.ts 提供 Google Cloud Storage 持久化后端供分布式 A2A 场景使用。",
+    "permission_security": "PolicyEngine（packages/core/src/policy/policy-engine.ts）实现基于规则列表的工具调用策略：支持精确名称、通配符（*/__）、MCP server 级别的 ALLOW/DENY/ASK_USER 三态决策；HookSystem（packages/core/src/hooks/hookSystem.ts）在 before_model / after_model / before_tool_selection / before_tool_execution 等生命周期节点注入可配置的外部钩子脚本，可阻断或修改请求；folder trust 机制防止在不可信目录执行敏感操作；沙箱层（bwrap/seatbelt）对 shell 工具提供 OS 级隔离。ApprovalMode（DEFAULT/YOLO/PLAN）控制全局交互粒度。",
+    "prompt_engineering": "PromptProvider（packages/core/src/prompts/promptProvider.ts）动态组装系统 prompt：通过 snippets.ts 中的 40+ 个 snippet 函数按功能域分段构建（coreMandates/primaryWorkflows/planningWorkflow/sandbox/gitRepo 等），支持 GEMINI_SYSTEM_MD 环境变量完全覆盖；支持 GEMINI.md 文件注入工程上下文；Plan Mode 下 write-file/edit 工具 description 会被动态修改为只允许写 plans 目录，形成 prompt-level 约束。",
+    "provider_abstraction": "packages/core/src/core/contentGenerator.ts 定义 ContentGenerator 接口，实现层包括 GeminiClient（官方 @google/genai SDK）、LocalLiteRtLmClient（本地 LiteRT 推理，用于离线/边缘场景）、BaseLlmClient 基类；ModelConfigService 支持 per-agent 模型覆盖（modelConfig.model: 'inherit' | string）；ModelAvailabilityService + ModelRouterService 实现模型可用性检测和自动降级（Flash fallback）；虽然目前只支持 Gemini 系列，但接口层面具备多 provider 扩展能力。",
+    "ui_surface_layers": "CLI 交互层使用 ink（React for terminal），packages/cli/src/ui/ 包含 130+ 个 React hooks 和组件：App.tsx → DefaultAppLayout（Box/Notifications/MainContent/DialogManager/Composer/BackgroundTaskDisplay）；ThemeManager 支持 20+ 套内置主题（Dracula/TokyoNight/GitHub Dark 等）和用户自定义主题；useGeminiStream hook 承担流式响应与工具调用的 UI 状态机管理，useTool­Scheduler hook 连接 Scheduler；支持 alternate buffer（全屏模式）、vim key bindings、mouse 输入、screen reader 无障碍模式；VS Code companion 包通过 ACP (Agent Control Protocol) stdio 接入 IDE；non-interactive 模式（nonInteractiveCli.ts）支持管道/脚本场景。",
+    "execution_sandbox": "packages/core/src/sandbox/ 提供三套沙箱实现：macOS 的 MacOsSandboxManager（调用 sandbox-exec + seatbelt profile，限制文件系统访问路径和网络）；Linux 的 LinuxSandboxManager（调用 bubblewrap bwrap，挂载命名空间隔离）；以及 Docker/Podman 容器沙箱（build_sandbox.js 构建镜像，GEMINI_SANDBOX env 变量切换）。SandboxManager.prepareCommand() 统一接口让 ShellTool / DiscoveredTool 等透明使用沙箱。"
+  },
+  "standout_techniques": [
+    {
+      "name": "事件驱动流式 Agent 循环 (AsyncGenerator 事件总线)",
+      "what": "Turn.run() 返回 AsyncGenerator<ServerGeminiStreamEvent>，以细粒度事件枚举（Content/Thought/ToolCallRequest/ToolCallResponse/ChatCompressed/LoopDetected 等16种）向上游传递；AgentSession.stream() 在此基础上提供 eventId 断点续播和 streamId 过滤，实现会话恢复和多路复用。",
+      "why_borrow": "这种事件驱动设计使 UI 层（ink）、非交互模式、A2A 服务端都能以相同接口消费 agent 状态，是多端复用的关键。建议直接借鉴此 event schema 设计网页端的 SSE/WebSocket 协议。"
+    },
+    {
+      "name": "ContextProcessor 管道 + DAG 图上下文管理",
+      "what": "ContextManager 将对话历史建模为 ConcreteNode DAG，通过 PipelineOrchestrator 调度多个 ContextProcessor（摘要/截断/蒸馏/遮蔽）以增量方式处理图节点；内置 hysteresis 防止频繁触发，lastRenderCache 避免重复渲染。",
+      "why_borrow": "比直接截断 token 的方案更精细，适合长对话 agent；管道架构便于插入自定义处理器（如个性化摘要、知识库检索注入）。"
+    },
+    {
+      "name": "三层工具发现机制 (built-in / DiscoveredTool / MCP)",
+      "what": "toolDiscoveryCommand 子进程返回 FunctionDeclaration JSON 数组即可动态注册工具（DiscoveredTool），运行时无需重启；MCP 支持 ToolListChangedNotification 热更新；ToolRegistry.clone() 支持子 agent 的工具集隔离。",
+      "why_borrow": "用户可在不修改核心代码的情况下扩展工具集，适合构建插件化 agent 平台；DiscoveredTool 模式对 web 端 agent 同样适用（替换 spawn 为 fetch 即可）。"
+    },
+    {
+      "name": "HookSystem 生命周期拦截",
+      "what": "HookSystem 在 session_start / before_model / after_model / before_tool_selection / before_tool_call / after_tool_call / session_end / pre_compress 等节点触发外部可执行脚本，支持 modify（修改请求）/ block（阻断）/ stop（终止会话）三种动作，并且可以注入 synthetic response。",
+      "why_borrow": "这是一种干净的 AOP（面向切面）扩展模式，无需修改核心逻辑即可接入审计日志、内容过滤、自定义限流等横切关注点。"
+    },
+    {
+      "name": "A2A 协议多智能体远程编排",
+      "what": "A2AClientManager 支持 JSON-RPC/REST/gRPC 三种传输，30分钟超时，支持 task streaming；packages/a2a-server 将本地 agent 暴露为 A2A 服务端；AgentTool 统一本地/远程调用接口，对模型不透明。",
+      "why_borrow": "Agent-to-Agent 协议是 2025 年新兴标准，借鉴此实现可快速构建支持跨服务 agent 委托的分布式 agent 网络，适合「调研 subagent + 写作 subagent + 规划 subagent」等角色分工架构。"
+    },
+    {
+      "name": "ink (React) 主题化 TUI 架构",
+      "what": "全 TUI 使用 React 组件树（ink），130+ hooks 覆盖流式渲染、工具确认、历史回滚、vim 键位、鼠标点击、无障碍等；ThemeManager 支持 20+ 内置主题 + 用户自定义 JSON 主题；SemanticColors token 系统与组件解耦。",
+      "why_borrow": "CLI 端与 Web 端共享 React 编程模型，降低跨端开发成本；ThemeManager 的语义 token 体系可直接迁移到 Web 设计系统。"
+    },
+    {
+      "name": "ChatCompressionService 自动上下文压缩",
+      "what": "当 token 使用超过配置阈值（默认 70% 上下文窗口），自动调用 Gemini Flash Lite 生成对话摘要替换历史；支持 CompressionStatus 枚举记录压缩结果（成功/通胀失败/空摘要等），并通过 ChatCompressed 事件通知 UI。",
+      "why_borrow": "对于 「调研/规划」 等长对话场景不可缺少；Flash Lite 压缩成本极低，可作为生产级上下文管理策略直接复用。"
+    },
+    {
+      "name": "JSONL 会话持久化 + 断点续播",
+      "what": "每条消息追加写入 JSONL 文件，支持 --resume（恢复最近会话）/ --rewind（回滚到指定消息）/ checkpoints；GCS 后端供 A2A 分布式场景使用。",
+      "why_borrow": "JSONL 格式适合流式写入且易于增量读取，断点续播对长任务 agent（自动化调研、批量代码重构）是刚需。"
+    }
+  ],
+  "capability_coverage": {
+    "code": "极强。内置 edit/write-file/read-file/glob/grep/ripgrep/shell 全套代码操作工具；CodebaseInvestigatorAgent 专为代码库分析设计；Plan Mode 支持先规划后执行的安全代码修改流程；沙箱隔离 shell 执行；TrackerTools 支持任务依赖图管理。",
+    "writing": "中等。通过 web-fetch/web-search 支持素材获取，GEMINI.md 提供上下文注入，Skills 机制可注入写作风格 prompt，但无专用写作工具或结构化文档生成器，需自行通过 write-file 输出。",
+    "research": "较强。web-search（Google Search API）+ web-fetch 组合支持网络调研；CodebaseInvestigatorAgent 专为代码库深度调研设计；GeneralistAgent 可作为调研子 agent；但无专属的 deep research 工作流或引用管理能力。",
+    "computer_use": "有限实现。packages/core/src/agents/browser/ 包含完整 BrowserAgent（基于 MCP + Playwright），支持截图分析（analyze_screenshot）、AX 树导航、点击输入等；安全规则防止 prompt injection；但仅限于浏览器，无桌面 GUI 控制能力。",
+    "planning": "中等偏强。ApprovalMode.PLAN 模式限制工具只能写 plans 目录；EnterPlanModeTool/ExitPlanModeTool 允许动态切换；write-todos 工具支持结构化任务列表；TrackerService 支持任务依赖图和可视化；但规划与执行的切换仍需手动触发，缺乏自动规划-验证-执行闭环。"
+  },
+  "weaknesses_avoid": [
+    "强 Gemini 绑定：ContentGenerator 接口虽存在抽象层，但模型名称常量（DEFAULT_GEMINI_MODEL 等）和 @google/genai SDK 深度渗透各处，迁移到其他 provider（如 Anthropic/OpenAI）需大量改造，建议在自研系统中将 provider 抽象置于更高层级。",
+    "仅 CLI 表层，无 Web-first UI：ink (React for terminal) 与 Web React 虽共享编程模型，但组件无法直接复用；所有 UI 状态管理（130+ hooks）均为 CLI 假设设计，网页化需全面重写 UI 层，核心 packages（core/sdk）可复用。",
+    "A2A 协议实验性：A2A SDK (@a2a-js/sdk) 仍处于快速演进阶段（版本 0.16.x），API 稳定性不足，gRPC 传输依赖 @grpc/grpc-js 增加了 native 编译风险。",
+    "平台沙箱割裂：Linux bwrap / macOS seatbelt / Docker 三套实现各自独立，维护成本高；Windows 目前缺乏等价的 OS 级沙箱方案，仅靠 Docker 覆盖，在 Windows-first 场景中存在体验缺口。",
+    "遥测数据对 Google 强依赖：Clearcut logger 和 GCP exporter 为 Google 内部基础设施量身定制，开源使用时需手动禁用或替换为 OpenTelemetry 标准导出器。",
+    "browser_agent 对 Playwright/MCP 高度耦合：BrowserAgent 通过 MCP 包装 Playwright，启动成本高（需安装浏览器二进制），不适合轻量 cloud 部署场景，应将 computer use 设计为可选插件而非核心依赖。",
+    "Skills 系统仅为 prompt snippet，能力有限：Skills 本质是注入 system prompt 的 Markdown 文本，无法携带代码逻辑，相较于真正的插件系统（如可执行 JS 模块）能力受限，对「写代码/调研」等复杂能力扩展力不足。"
+  ],
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/core/turn.ts",
+      "role": "Agent 主循环最内层：Turn.run() AsyncGenerator，定义所有 GeminiEventType 事件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/local-executor.ts",
+      "role": "LocalAgentExecutor：多轮 ReAct 迭代驱动，complete_task 终止逻辑"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/tools/tool-registry.ts",
+      "role": "ToolRegistry：三类工具统一注册/发现/过滤/排序，DiscoveredTool subprocess 机制"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/tools/tools.ts",
+      "role": "BaseDeclarativeTool / BaseToolInvocation 抽象基类，工具接口契约"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/tools/mcp-client.ts",
+      "role": "MCP 客户端：四种传输、OAuth2、ToolListChanged 热更新"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/scheduler/scheduler.ts",
+      "role": "Scheduler：并行工具执行、确认拦截、Policy 检查、Hook 触发"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/context/contextManager.ts",
+      "role": "ContextManager：DAG 图上下文、Pipeline 管道、热启动校准"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/context/chatCompressionService.ts",
+      "role": "自动 token 压缩服务，调用 Flash Lite 生成摘要"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/context/pipeline.ts",
+      "role": "ContextProcessor / PipelineOrchestrator 接口定义"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/agent-tool.ts",
+      "role": "AgentTool：统一 local/remote subagent 调用入口"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/registry.ts",
+      "role": "AgentRegistry：内置 + 动态加载 agent 定义管理"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/a2a-client-manager.ts",
+      "role": "A2AClientManager：远程 agent 协议协商、JSON-RPC/REST/gRPC 传输"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/generalist-agent.ts",
+      "role": "GeneralistAgent：通用子 agent 定义模板，可直接参考 LocalAgentDefinition 格式"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/hooks/hookSystem.ts",
+      "role": "HookSystem：生命周期 AOP 拦截，before/after model & tool 钩子"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/policy/policy-engine.ts",
+      "role": "PolicyEngine：工具调用策略规则引擎，通配符匹配与 MCP server 级授权"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/skills/skillManager.ts",
+      "role": "SkillManager：extension→user→workspace 三级 Skills 发现与激活"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/prompts/promptProvider.ts",
+      "role": "PromptProvider：动态 system prompt 组装，snippets 分段构建"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agent/agent-session.ts",
+      "role": "AgentSession：AsyncIterable 包装，支持 eventId 断点续播和 streamId 过滤"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/services/chatRecordingService.ts",
+      "role": "ChatRecordingService：JSONL 会话持久化，--resume/--rewind 支持"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/cli/src/ui/App.tsx",
+      "role": "ink UI 根组件，alternate buffer / screen reader 分支"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/cli/src/ui/layouts/DefaultAppLayout.tsx",
+      "role": "默认 TUI 布局：MainContent/Composer/BackgroundTask 分区"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/cli/src/ui/hooks/useGeminiStream.ts",
+      "role": "useGeminiStream：流式响应与工具调用的核心 UI 状态机"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/cli/src/ui/themes/theme-manager.ts",
+      "role": "ThemeManager：20+ 内置主题 + 自定义 JSON 主题管理"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/cli/src/gemini.tsx",
+      "role": "CLI 主入口：配置加载、auth、interactive/non-interactive 分支、sandbox 启动"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/a2a-server/src/agent/executor.ts",
+      "role": "A2A 服务端 agent executor，将本地 agent 暴露为 A2A HTTP 端点"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/packages/core/src/agents/browser/browserAgentDefinition.ts",
+      "role": "BrowserAgent：computer use 定义，含安全规则和 visual identification 工作流"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/gemini-cli/package.json",
+      "role": "monorepo 根配置：workspaces、bin 入口、sandbox image URI、ink 版本覆盖"
+    }
+  ]
+}

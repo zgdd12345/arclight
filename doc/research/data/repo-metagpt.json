@@ -1,0 +1,157 @@
+{
+  "repo": "MetaGPT (geekan/MetaGPT) — 多智能体框架，对应商业产品 MGX (mgx.dev)",
+  "one_liner": "\"Code = SOP(Team)\" —— 把人类标准作业流程(SOP)物化为多角色 LLM 协作流水线的多智能体框架；新一代以 RoleZero(动态 think-act + 命令/工具) + TeamLeader 路由为核心，覆盖软件开发、数据分析、调研、写作、computer use。",
+  "positioning": "定位为\"AI 软件公司/AI 开发团队\"：输入一句话需求，由 PM/架构师/工程师/数据分析师等角色按 SOP 协同产出 PRD、设计、代码、文档。代码库内同时存在两代架构——经典 SOP 流水线(Role+Action+ActionNode，by_order 固定流程)与新一代 MGX/RoleZero(react 动态命令循环 + TeamLeader 中枢路由)。是研究驱动的框架(AFlow/SPO/SELA/Data Interpreter 等多篇论文随附实现)，偏 Python 后端编排，无内置 Web/桌面/CLI 多端 UI 表层(商业端 mgx.dev 闭源)。对你的\"全平台个人 Agent\"而言，最大可借鉴点是多智能体编排范式与非编码产出流水线，而非端侧工程。",
+  "primary_language": "Python (>=3.9, <3.12)",
+  "stack": "Python + asyncio；Pydantic v2(全量数据建模/序列化)；typer/fire(CLI 入口)；OpenAI SDK 兼容层(统一各家 provider)；tenacity(重试)；llama-index + Chroma/FAISS(RAG/长期记忆，extras)；playwright/selenium(浏览器)；nbclient/nbformat(Notebook 代码执行)；gymnasium(环境抽象 ExtEnv)；BM25(工具推荐)。",
+  "license": "MIT License (Copyright (c) 2024 Chenglin Wu)，见 /Users/fsm/project/arclightagent/MetaGPT/LICENSE",
+  "architecture": {
+    "agent_loop": "两套并存。经典 Role(role.py)：_observe→_think(选 state/action)→_act 的三段循环，支持 react/by_order/plan_and_act 三种 react_mode。新一代 RoleZero(roles/di/role_zero.py)：在 _react 内每轮先 _observe 再 _think(LLM 直接产出命令文本)再 _act(解析命令→执行工具)，max_react_loop=50；带 _quick_think 快速路由(QUICK/SEARCH/TASK/AMBIGUOUS 四类意图分流，避免简单问题走重型循环)；达到上限会 ask_human 询问是否继续。",
+    "tool_system": "装饰器注册表 ToolRegistry(tools/tool_registry.py)：@register_tool 自动从类/函数源码经 AST/inspect 抽取 schema，支持 tags 分组、Editor:read,write 方法级筛选、运行时从路径动态注册；BM25ToolRecommender 按任务语义召回工具子集注入 prompt(tool_recommend.py)。RoleZero 用 tool_execution_map 把命令名映射到可调用对象，LLM 输出命令列表→逐条执行(_run_commands)，有 special/exclusive 命令特判。",
+    "context_memory": "分层：Memory(短期，按 cause_by/action 索引)、working_memory(每任务即弃)、RoleZeroLongTermMemory(memory/role_zero_memory.py，超过 memory_k=200 条溢出到 RAG/Chroma，检索 top_k 回填，可选 LLMRanker 重排)、BrainMemory；Planner 用 get_useful_memories 做结构化上下文裁剪。_think 时还会对历史做 parse_browser_actions/parse_editor_result/parse_images 等多模态预处理。",
+    "provider_abstraction": "BaseLLM 抽象类 + @register_provider 注册表(provider/llm_provider_registry.py)，create_llm_instance 按 config.api_type 选择。已内置 openai/azure/anthropic/gemini/ollama/bedrock/dashscope/qianfan/spark/zhipu/ark/openrouter/human 等十余家；多以 OpenAI 兼容协议为基。CostManager 统一计费与预算(investment)管控。",
+    "execution_sandbox": "非强隔离。代码执行有两条路：ExecuteNbCode(actions/di/execute_nb_code.py，基于 nbclient 持久 Jupyter kernel，支持实时流式输出、超时、重启)；Terminal 工具(tools/libs/terminal.py，持久 bash/cmd 子进程，含 forbidden_commands 黑名单引导)。另有 Dockerfile/.devcontainer 提供容器化运行，但默认直接在宿主跑——安全边界弱。",
+    "ui_surface_layers": "框架层主要是 CLI(software_company.py 的 typer app + 各 role __main__ 的 fire 入口)；输出通过 Reporter(ThoughtReporter/NotebookReporter/TerminalReporter/EditorReporter)抽象成可流式上报的事件，便于上层 UI(商业端 mgx.dev)消费。仓内无 Web/桌面/插件前端实现。examples/ 下有 Gradio/订阅等零散 demo。",
+    "extensibility_plugins": "扩展性强但偏'代码即插件'：新增 Role 子类(继承 RoleZero 改 tools/instruction/experience_retriever 即得新智能体)、@register_tool 加工具、@register_provider 加模型、ext/ 目录承载完整外部能力包(aflow 自动工作流生成、sela、spo、cr 代码评审、android_assistant、stanford_town、werewolf 等)。无标准化第三方插件市场/MCP 机制。",
+    "multi_agent": "核心竞争力。Environment(共享消息总线)+Team(software_company.py 雇佣角色、invest 预算、run n_round)。新一代 MGXEnv(environment/mgx/mgx_env.py)由 TeamLeader(Mike)接管全部 publish——常规消息一律先路由给 TL，由其 publish_team_message(content,send_to) 动态派活；支持 @role 直聊(direct_chat_roles)与公共群聊(is_public_chat)。消息靠 send_to/addresses 订阅 + cause_by(Action 类型)双重过滤投递(Role.publish_message / Environment.publish_message)。",
+    "session_persistence": "SerializationMixin + Pydantic model_dump 全链路可序列化；Team.serialize/deserialize 写 team.json，可 recover_path 从断点恢复(含 latest_observed_msg 续跑);Context 也可序列化。代码产物用 GitRepository.archive 归档。",
+    "permission_security": "较弱。SECURITY.md 仅声明邮箱；is_human/HumanProvider + ask_human 提供人在环确认；Terminal 有命令黑名单、ask_human 在达上限时介入、AskReview 在 plan/任务结果处可人工审核。但工具执行、terminal、代码运行默认无沙箱、无细粒度权限授权 prompt，依赖容器隔离。",
+    "prompt_engineering": "高度模板化与分层。每个 Action 自带 PROMPT 常量；ActionNode(actions/action_node.py)是结构化输出骨架——把字段+类型+指令声明为节点，自动拼 format example、约束输出 [CONTENT] 包裹的 JSON/Markdown，支持 code_fill/xml_fill/single_fill 三种填充与 review/revise 自校正、语言对齐约束。RoleZero 的 system/cmd/quick_think prompt 集中在 prompts/di/。TaskType 注入'人类先验 guidance'。"
+  },
+  "capability_coverage": {
+    "code": "强(框架原生主场)。经典链路：ProductManager(WritePRD)→Architect(WriteDesign)→ProjectManager→Engineer(WriteCode/CodeReview/WriteTest/DebugError)；新链路 Engineer2/SWE Agent 用 Editor(行级编辑+lint)+Terminal+git_create_pull+Deployer 端到端开发部署。DataAnalyst 用 Jupyter 持久 kernel 跑数据/ML。覆盖度与工程成熟度最高。",
+    "writing": "中等。有 TutorialAssistant(WriteDirectory→分章 WriteContent，by_order 流水线产出 Markdown 教程)、teacher(写教学计划)、write_review 等;但无通用'长文写作/润色/风格控制'的成体系角色，写作更多是教程/文档形态，缺少大纲-草稿-精修-引用的现代写作流水线。",
+    "research": "中等偏上。Researcher(roles/researcher.py)三段 SOP：CollectLinks→WebBrowseAndSummarize(并发抓取摘要)→ConductResearch，自动落地 .md 报告;另有 SearchEnhancedQA + 多家搜索引擎(serpapi/serper/bing/google/ddg)与 playwright/selenium 浏览器。RAG 模块可做文档 QA。证据链/引用规范化较弱。",
+    "computer_use": "中等。Browser 工具(playwright，click/type/scroll/goto 等带 element_id 的页面操作)+Terminal+Editor 构成基础 computer-use 能力;ext/android_assistant 提供 Android 设备自动化(截图+点击)。但无通用桌面 GUI 视觉接管(屏幕坐标级 OS 控制)。",
+    "planning": "中等(任务规划强，日常生活规划弱)。Planner+Plan/Task(strategy/planner.py)支持动态 update_plan、ask_review 人审、按 TaskType 注入 guidance、plan_and_act 模式;TeamLeader 做任务分派。但这是'项目/任务规划'，没有日历/提醒/个人日常事务(GTD)类生活规划能力，需自行补足。"
+  },
+  "cross_platform_approach": "框架本身不做跨端，而是把'产出/思考过程'抽象为可流式上报的 Reporter 事件(ThoughtReporter/NotebookReporter/TerminalReporter/EditorReporter)，由外部 UI(闭源商业端 mgx.dev)订阅渲染——这是'核心 engine 与表层解耦'的思路。引擎暴露 CLI(typer)与 Python SDK 级 API(Role.think/act 注释为 AgentStore RPC 用)。要做你的全平台个人 Agent，可复用这种'统一事件流 + 多前端订阅'解耦模式，但需自建 Web/桌面/CLI/插件表层与服务化协议(仓内缺失)。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/software_company.py",
+      "role": "CLI 入口(typer)与团队装配：hire(TeamLeader/PM/Architect/Engineer2/DataAnalyst)+invest+run，generate_repo 主流程与断点恢复"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/team.py",
+      "role": "Team 编排：雇佣角色、预算(CostManager)、n_round 主循环、序列化/反序列化恢复，默认用 MGXEnv"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/roles/role.py",
+      "role": "经典 Role 基类：_observe/_think/_act 三段循环、react/by_order/plan_and_act 三模式、_watch 订阅、publish/put_message 消息机制"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/roles/di/role_zero.py",
+      "role": "新一代核心：动态 think-act、命令解析执行、quick_think 意图路由、tool_execution_map、exp_cache 经验、长期记忆装配——所有新角色基类"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/environment/mgx/mgx_env.py",
+      "role": "MGX 环境：TeamLeader 接管消息发布、@role 直聊/公共群聊、消息信息搬运到 content 让 TL 可见、ask/reply_to_human"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/roles/di/team_leader.py",
+      "role": "TeamLeader 中枢：publish_team_message 动态派活、组装团队信息进 prompt、单轮反应式调度"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/environment/base_env.py",
+      "role": "Environment/ExtEnv：共享消息总线、按 addresses+cause_by 路由投递、mark_as_readable/writeable 的 env API 注册、gymnasium 风格 step/observe"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/actions/action_node.py",
+      "role": "ActionNode 结构化输出引擎：字段/类型/指令声明→自动 format example+约束+多种填充模式+review/revise 自校正"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/tools/tool_registry.py",
+      "role": "工具注册表：@register_tool 从源码 AST 抽 schema、tags 分组、方法级筛选、运行时路径注册"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/strategy/planner.py",
+      "role": "Planner：动态 update_plan、ask_review 人审、Plan/Task 状态、结构化上下文裁剪、按 TaskType 注入 guidance"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/strategy/task_type.py",
+      "role": "TaskType 枚举：为不同任务类型注入人类先验 guidance prompt，驱动工具推荐与代码生成"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/provider/llm_provider_registry.py",
+      "role": "Provider 抽象：@register_provider + create_llm_instance，按 api_type 选模型；配合 provider/base_llm.py 统一接口"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/memory/role_zero_memory.py",
+      "role": "RoleZero 长期记忆：短期溢出到 RAG(Chroma)、相似检索回填、可选 LLMRanker 重排"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/exp_pool/decorator.py",
+      "role": "exp_cache 经验池装饰器：fetch/score/perfect-judge/save 闭环，命中完美经验直接复用，否则执行后入库(自我进化雏形)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/actions/di/execute_nb_code.py",
+      "role": "持久 Jupyter kernel 代码执行(nbclient)：实时流式输出、超时、死核重启——数据/ML 主力执行器"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/tools/libs/terminal.py",
+      "role": "持久 bash/cmd 子进程终端工具，含 forbidden_commands 黑名单引导"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/tools/libs/browser.py",
+      "role": "playwright 浏览器工具：element_id 级 click/type/scroll/goto，computer-use/网页调研基础"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/roles/researcher.py",
+      "role": "调研 SOP 范例：CollectLinks→WebBrowseAndSummarize(并发)→ConductResearch→落地 .md 报告"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/roles/tutorial_assistant.py",
+      "role": "写作流水线范例：先生成目录再分章 WriteContent，by_order 产出结构化 Markdown 教程"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/MetaGPT/metagpt/ext/aflow/scripts/optimizer.py",
+      "role": "AFlow 自动化工作流生成(ICLR2025)：用 LLM 搜索/优化 agentic workflow 图，自我改进编排"
+    }
+  ],
+  "standout_techniques": [
+    {
+      "name": "TeamLeader 中枢路由 + 共享消息总线(MGXEnv)",
+      "what": "所有消息默认先经 TeamLeader，由其 publish_team_message(content, send_to) 动态把任务派给具体角色；角色靠 addresses 订阅 + cause_by(产生该消息的 Action 类型)双重过滤接收。支持 @role 直聊与公共群聊切换。",
+      "why_borrow": "为多智能体提供了清晰的'调度员'范式，避免角色两两硬编码连线；send_to/cause_by 双过滤是优雅的去中心化路由。你的个人 Agent 做'主控+子能力'编排时可直接借这套消息总线 + 单一 orchestrator 思路。"
+    },
+    {
+      "name": "RoleZero 统一基类 + 命令式工具循环 + quick_think 意图分流",
+      "what": "一个 RoleZero 基类承载 think-act 循环、命令解析执行、记忆、经验、长期记忆；新角色只需改 tools/instruction/experience_retriever。每次先用轻量 LLM 把请求分流为 QUICK/SEARCH/TASK/AMBIGUOUS，简单问题不走重型循环。",
+      "why_borrow": "'一个强基类 + 配置化派生多智能体'极大降低扩展成本；意图分流显著省 token、降延迟，正适合个人 Agent 既要答简单问题又要跑复杂任务的混合负载。"
+    },
+    {
+      "name": "ActionNode 结构化输出 + 自动 review/revise",
+      "what": "把期望输出建模为带类型与指令的节点树，自动生成 format example、约束 LLM 输出包裹的 JSON/Markdown，并内置 auto/human review→revise 自校正与语言对齐。",
+      "why_borrow": "比裸 prompt 可靠得多的结构化产出机制，写文章/调研报告/PRD 等非编码产出尤其需要;自校正闭环可显著提升一次成稿质量。"
+    },
+    {
+      "name": "@register_tool 源码即 schema + BM25 工具召回",
+      "what": "装饰器从类/函数源码经 AST/inspect 自动抽 schema(含 docstring 作描述)，支持 tags 与 Editor:read,write 方法级筛选;运行时按任务语义用 BM25 只召回相关工具注入 prompt。",
+      "why_borrow": "零样板新增工具，且通过召回控制上下文中工具数量——工具一多时这是控 token、保命中的关键。个人 Agent 工具会快速膨胀，强烈值得借。"
+    },
+    {
+      "name": "exp_pool 经验池(exp_cache 装饰器)",
+      "what": "装饰器把一次 LLM 调用的请求/响应打分入库，下次命中'完美经验'直接复用，否则执行后再评估保存;RoleZero 的核心 LLM 调用即用它包裹。",
+      "why_borrow": "轻量的'自我进化/经验复用'机制，跨会话沉淀成功解法，降低重复任务成本与抖动。是个人长期 Agent 提升一致性的低成本切入点。"
+    },
+    {
+      "name": "统一 Reporter 事件流(引擎/UI 解耦)",
+      "what": "把思考、Notebook、终端、编辑器输出统一为可流式上报的 Reporter 事件，引擎不关心前端，由上层订阅渲染。",
+      "why_borrow": "正中你'全平台多端'要害：核心 engine 产出统一事件流，Web/CLI/桌面/插件各自订阅渲染，是多端一致体验的工程主干。"
+    },
+    {
+      "name": "TaskType 人类先验注入 + Planner 动态重规划",
+      "what": "为每类任务预置 guidance prompt，规划与代码生成时按任务类型注入领域先验;Planner 支持 update_plan/ask_review/redo 的人在环动态重规划。",
+      "why_borrow": "用结构化先验把'通用 Agent'调成'各场景专家'，且保留人审与重规划弹性——适合个人 Agent 在写作/调研/规划等异质任务间切换。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "执行无强沙箱：Terminal/代码执行默认直接在宿主跑，仅靠命令黑名单 + 可选 Docker，缺细粒度权限授权 prompt。个人 Agent 涉及 computer use/跑代码务必自建沙箱(容器/VM/seccomp)与逐操作授权，别照搬其宽松默认。",
+    "两代架构并存、技术债重：经典 Role+ActionNode(SOP 固定流程)与新 RoleZero(动态命令)同仓共存，大量 deprecated/HACK/FIXME 注释(如 set_plan_and_tool 自承 HACK、quick_think 误分类 FIXME)。借鉴时只挑新一代(di/、mgx)，勿被旧链路误导。",
+    "非编码产出能力偏薄：写作仅教程/文档形态，缺通用长文'大纲-草稿-精修-引用'流水线;调研缺引用规范与事实核查;无日常生活规划(日历/提醒/GTD)。这三块你需要自行设计，仓内只能给骨架不能给成品。",
+    "Pydantic 全量建模带来的耦合与序列化复杂度：Role/Env/Message 深度用 Pydantic + 自定义 SerializationMixin，循环引用要靠 exclude=True 规避(代码中多处注释),恢复逻辑(latest_observed_msg 续跑)较脆。自建时序列化边界要更克制。",
+    "无标准插件/MCP 生态:扩展全靠改 Python 代码与 ext/ 目录，没有第三方插件市场或 MCP 等开放协议。要做'插件'端需另起标准化机制。",
+    "成本/预算控制粗:靠 investment 美元额度 + CostManager 总额熔断(NoMoneyException)，无按角色/按任务的细粒度配额与降级策略。",
+    "Python 版本受限(>=3.9,<3.12)且 RAG/搜索等依赖以 extras 分裂安装，环境组装成本高;多端/服务化所需的 Web/桌面/CLImetainfo 表层与 RPC 协议仓内缺失,'全平台'部分基本要从零做。"
+  ]
+}

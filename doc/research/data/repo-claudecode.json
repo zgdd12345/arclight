@@ -1,0 +1,211 @@
+{
+  "repo": "claudecode (本地路径 /Users/fsm/project/arclightagent/claudecode) — Anthropic Claude Code 的反混淆/重构 TS/TSX 源码树",
+  "one_liner": "Claude Code 本体的 TypeScript/React(ink TUI)实现：以单条 async-generator 主循环 + 工具系统 + 多级上下文压缩 + fork/coordinator 子代理编排为核心的终端优先 AI 编码 Agent，并通过 bridge/WebSocket 扩展到远程/移动/桌面端。",
+  "positioning": "最贴近\"标杆体验\"的参考实现。生产级、终端优先(ink TUI)的单体 Agent，工程重心压在三件事:(1) 把\"模型流式输出→工具并发执行→结果回灌\"的 agentic 循环做成可中断、可压缩、可恢复的 async generator;(2) 用细粒度权限/沙箱把\"代理自动执行 bash/写文件\"变得对个人用户安全可控;(3) 用 fork-subagent/coordinator + skills/hooks/plugins/MCP 让单 Agent 水平扩展到多任务与第三方能力。其循环架构、压缩策略、权限模型、扩展机制可几乎整体借鉴;但它是闭源单体、围绕\"软件工程\"深度定制,网页/桌面端是通过 bridge 远程驱动 CLI 而非原生多端,这两点需在全平台/多能力目标下重新设计。",
+  "primary_language": "TypeScript / TSX (React)",
+  "stack": "运行时 Bun(`import { feature } from 'bun:bundle'` 编译期死代码消除)/Node 兼容;UI 用 ink(React-for-CLI,ink.ts + ink/ + components/);模型 SDK 用 @anthropic-ai/sdk(beta messages);工具扩展走 @modelcontextprotocol/sdk(MCP);schema 校验 zod/v4;特性门用 Statsig/GrowthBook;远程端用 WebSocket/SSE/HybridTransport。无 package.json/Cargo.toml(源码树非完整构建工程)。",
+  "license": "无 OSS LICENSE 文件。这是 Anthropic Claude Code 的专有(proprietary)商业代码;代码中大量 `USER_TYPE === 'ant'`/`feature(...)` 门控的内部(\"ANT-ONLY\")功能进一步表明是闭源内部源码。可作架构学习参考,不可直接复用其代码。",
+  "architecture": {
+    "agent_loop": "核心是 query.ts 的 query() → queryLoop() 双层 async generator(无限 while(true) 循环)。每轮:① 取压缩边界后的消息 → 跑 snip/microcompact/autocompact 三级压缩 → ② yield {type:'stream_request_start'} 并流式调模型(QueryEngine.ts 负责把内部 Message 流转成 SDK 协议消息) → ③ 解析 tool_use 块,交给 services/tools/toolOrchestration.ts 的 runTools() 执行 → ④ 工具结果作为 user-role tool_result 回灌,continue 进入下一轮。整套用 generator + yield* 委托,使得'流式 token、工具进度、压缩边界、子代理输出'统一成一条可中断(abortController.signal)、可 .return() 提前结束的事件流。状态用单个可变 State 对象在迭代顶部解构,避免 7 处 continue 各自赋值。AssistantMessage/UserMessage/ProgressMessage 等强类型消息(types/message.ts)。",
+    "tool_system": "Tool.ts 定义统一 Tool<Input,Output> 接口(zod inputSchema + 可选 inputJSONSchema 给 MCP)。关键方法:call()(async,返回 ToolResult,带 onProgress 流式进度)、isReadOnly()/isConcurrencySafe()/isDestructive()/isEnabled()、validateInput()→checkPermissions() 两段式校验、prompt()(向模型描述工具)、renderToolUseMessage/renderToolResultMessage(ink 渲染)、toAutoClassifierInput()(喂安全分类器)、maxResultSizeChars(超限把结果落盘只回灌预览,见 utils/toolResultStorage.ts)。内置工具在 tools/ 下:Bash/FileRead/FileEdit/FileWrite/Glob/Grep/WebSearch/WebFetch/NotebookEdit/TodoWrite/Task*/Agent/Skill/ToolSearch 等。tools.ts 负责装配(assembleToolPool/getMergedTools/filterToolsByDenyRules)。调度:toolOrchestration.ts 的 partitionToolCalls() 把同一轮的 tool_use 按 isConcurrencySafe 切成批,只读批用 utils/generators.ts 的 all() 并发执行(默认上限 10,CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY 可调),写操作串行执行,并发批的 context 修改在批末统一合并。",
+    "context_memory": "三级压缩 + 持久记忆。(1) snip(services/compact/snipCompact.ts,HISTORY_SNIP 门控):裁剪策略;(2) microcompact(services/compact/microCompact.ts):仅清空旧 tool_result 内容(保留 tool_use_id 结构),优先用 cache-editing API(CACHED_MICROCOMPACT)按 tool_use_id 原地删除而非重写整段,从而保住 prompt cache;(3) autocompact(services/compact/autoCompact.ts):tokenCountWithEstimation 超 effectiveWindow(= contextWindow - reservedTokensForSummary)时触发,LLM 生成摘要并打 compactBoundary,后续只取边界后消息。另有 per-message tool-result 预算(applyToolResultBudget)。记忆:memdir/(MEMORY.md 入口,≤200 行/25KB,findRelevantMemories 在每轮 user turn 异步预取相关记忆,startRelevantMemoryPrefetch),services/SessionMemory + services/extractMemories 抽取会话记忆,services/teamMemorySync 团队共享。项目上下文:context.ts 的 getSystemContext/getUserContext(gitStatus、目录结构、CLAUDE.md)。",
+    "provider_abstraction": "utils/model/providers.ts 定义 APIProvider = 'firstParty'|'bedrock'|'vertex'|'foundry',由 CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY 环境变量切换;ANTHROPIC_BASE_URL 可改网关。utils/model/ 下细分:model.ts(getMainLoopModel/parseUserSpecifiedModel)、aliases.ts(ModelAlias)、modelCapabilities.ts、bedrock.ts、check1mAccess.ts(1M 上下文)、modelAllowlist.ts。services/api/claude.ts + client.ts 封装实际请求、withRetry.ts 重试、errors.ts 分类可重试错误。注意:抽象只覆盖 Anthropic 系/Claude 网关,不是通用多厂商(OpenAI/Gemini)抽象层。",
+    "execution_sandbox": "BashTool 是执行核心:tools/BashTool/shouldUseSandbox.ts 决定是否沙箱;entrypoints/sandboxTypes.ts 用 zod 定义沙箱配置(网络 allowedDomains/Unix socket、文件系统 allowWrite、http/socks 代理端口),平台相关(macOS Unix-socket 路径过滤 / Linux seccomp)。readOnlyValidation.ts + bashClassifier.ts 判定命令读写性,utils/permissions/dangerousPatterns.ts 黑名单(rm -rf、curl POST、eval 等)。后台任务(background bash)与 PowerShellTool/REPLTool 并存。tasks/LocalShellTask 管理本地 shell 任务生命周期(含子代理结束时 killShellTasksForAgent)。",
+    "ui_surface_layers": "ink(React for terminal)是唯一 UI 框架:ink.ts 封装 render/createRoot 并自动包 ThemeProvider;components/(146 个目录)是 TUI 组件库,含 design-system(ThemedBox/ThemedText/color)、permissions 对话框、messages 渲染、diff、agents 面板等。交互式入口 screens/REPL.tsx;无头入口 cli/print.ts(212KB,--print/stream-json)。hooks/ 下 80+ React hooks 管理输入缓冲、键位、IDE 连接、剪贴板、通知等。vim/、keybindings/ 提供 Vim 模式与可定制键位。",
+    "extensibility_plugins": "四层扩展:(1) MCP(services/mcp/):第三方工具/资源/提示,可在 agent frontmatter 里定义子代理专属 MCP server;(2) Skills(skills/ + tools/SkillTool):Markdown 定义的技能,列表只占 1% 上下文预算用于发现(SKILL_BUDGET_CONTEXT_PERCENT),调用时才加载全文,内置 bundled 技能 + 用户 skills 目录 + slash command 映射;(3) Plugins(plugins/ + utils/plugins/,40+ 文件):带 marketplace、版本管理、自动更新、blocklist、policy、依赖解析的完整插件系统,插件可注入 agents/commands/hooks/outputStyles/MCP;(4) ToolSearch(utils/toolSearch.ts + tools/ToolSearchTool):工具过多时把 MCP/可延迟工具标 defer_loading,模型按关键词(searchHint)搜索后再加载,控制 turn-1 schema 体积。",
+    "multi_agent": "两种编排:(A) AgentTool(tools/AgentTool):subagent_type 指定专家子代理(内置 explore/general-purpose/plan/verification/code-reviewer),全新上下文、可并行(一条消息发多个 Task 调用);fork-subagent(forkSubagent.ts,省略 subagent_type)是亮点——fork 继承父上下文并共享父的 prompt cache(故不可设 model),后台运行把工具噪声挡在父上下文外,完成后以 user-role <task-notification> 回灌。runAgent.ts 用 createSubagentContext 隔离 fileStateCache、记录 sidechain transcript。(B) Coordinator 模式(coordinator/coordinatorMode.ts,COORDINATOR_MODE 门控):主 Agent 退化为纯协调者,只能 Agent/SendMessage/TaskStop,把研究/实现/验证分派给异步 worker,强调'先并行研究→自己综合写 spec→worker 实现→独立对抗式验证'的工作流。验证契约写进系统提示:3+ 文件改动必须由 verification 子代理独立打 PASS/FAIL,不可自评。",
+    "session_persistence": "utils/sessionStorage.ts:每会话写 JSONL transcript(~/.claude/projects 下 {sessionId}.jsonl),消息以 parentUuid 串成链(isChainParticipant 判定,progress 消息不入链不持久化);子代理写 sidechain 子目录(setAgentTranscriptSubdir + recordSidechainTranscript)。50MB 读保护防 OOM。migrations/ 做格式迁移。resume:commands/resume + tools/AgentTool/resumeAgent.ts。cost-tracker.ts 把每会话累计成本/各模型 usage 存入 project config(saveCurrentSessionCosts/restoreCostStateForSession),resume 时恢复。bootstrap/state.js 管 sessionId 与持久化开关。",
+    "permission_security": "types/permissions.ts 定义模式:default/acceptEdits/plan/bypassPermissions(外部)+ auto/bubble(内部)。流程:Tool.validateInput()(模型可见的失败原因)→ checkPermissions()(工具自身逻辑)→ hooks/useCanUseTool.tsx 汇总成 allow/ask/deny。utils/permissions/ 有完整规则体系:PermissionRule 解析、shellRuleMatching(Bash(git *) 这类模式)、shadowedRuleDetection、denialTracking、pathValidation、bypassPermissionsKillswitch。auto 模式(ANT-ONLY)用 LLM bashClassifier 把命令分类为 allow/ask/deny(toAutoClassifierInput 提供给分类器的最小表示)。dangerousPatterns 硬黑名单。系统提示里专门强调'不要用破坏性操作绕过障碍(--no-verify/rm -rf)、不要谎报测试结果'。",
+    "prompt_engineering": "constants/prompts.ts(914 行)分段组装系统提示:systemPromptSection/DANGEROUS_uncachedSystemPromptSection/resolveSystemPromptSections 把可缓存与不可缓存段分离以护 cache;含 Tone(为人写而非 console 日志、首个工具调用前先说要做什么)、安全(OWASP top10 自查)、忠实报告(不谎报 test pass)、谨慎破坏性操作、子代理/fork 使用规约、验证契约。子代理用精简 DEFAULT_AGENT_PROMPT。outputStyles(constants/outputStyles.ts)提供可切换的输出人格(如 explanatory/learning 边写边讲、要求用户贡献代码片段),是'写文章/教学'类能力的雏形。--dump-system-prompt 可导出提示做敏感性评测。"
+  },
+  "capability_coverage": {
+    "code": "深度覆盖(本体强项)。完整文件读写/编辑(FileRead/Edit/Write、行级 diff)、Bash 执行+沙箱、Glob/Grep 搜索、LSP(LSPTool + services/lsp)、Notebook 编辑、Git/PR(commands/branch,pr_comments,review,issue,install-github-app)、独立对抗式验证子代理、plan 模式。系统提示、工具、子代理几乎都围绕软件工程定制。",
+    "writing": "中等,偏弱(非专门优化)。无专门的长文写作/大纲/引用管理工具;靠通用 FileWrite + 模型能力。但 outputStyles(可切换写作人格)、SkillTool(可加技能)、memdir(写作素材记忆)给了改造基座。要做'写文章'需自建结构化写作工具(大纲/章节/引用/修订追踪)。",
+    "research": "较强。WebSearch + WebFetch(带 ssrfGuard) + explore 子代理(并行多角度检索、min queries 阈值)+ fork 把检索噪声挡在主上下文外 + coordinator 的'并行研究→综合'工作流。MCP 可接外部数据源。但偏代码库内研究;通用网络深研需要更强的来源管理/交叉验证(对比 deep-research 类专用 harness)。",
+    "computer_use": "弱/外置。无内置屏幕截图/鼠标键盘 computer-use 工具;通过 Claude-in-Chrome 浏览器扩展(commands/chrome + utils/claudeInChrome)和外部 MCP(如 Playwright,见 classifyForCollapse 里的 browser_* 工具名;@ant/computer-use-* MCP 运行时门控)实现。要做原生 computer use 需自建工具或绑定专用 MCP。",
+    "planning": "中等偏强。plan 模式(EnterPlanModeTool/ExitPlanModeV2Tool,只读调研后产出计划再执行)、TodoWrite(任务清单面板)、TaskCreate/TaskList/TaskUpdate(任务管理 + Cron 调度 ScheduleCronTool,AGENT_TRIGGERS 门控)、proactive 自主模式(<tick> 心跳让 Agent 在轮次间保持活跃)。这套'计划-待办-定时-自主心跳'对'日常规划'能力很有借鉴价值。"
+  },
+  "cross_platform_approach": "单核心 + 多表层(thin-client)模式,而非真正原生多端。核心是同一套 CLI/Agent 引擎(entrypoints/cli.tsx → 交互式 REPL 或 cli/print.ts 无头 stream-json)。各端:(1) CLI/TUI:ink 渲染交互式 REPL(screens/REPL.tsx);(2) SDK/程序化:headless stream-json stdin/stdout 协议(entrypoints/sdk + cli/structuredIO.ts),供外部进程把 Claude Code 当 Agent 服务调用;(3) 远程/移动/桌面:bridge/ 把本地 CLI 会话经 WebSocket/SSE(cli/transports/{WebSocket,SSE,Hybrid}Transport.ts + remote/SessionsWebSocket.ts)桥接到云端会话,手机/桌面 App 实为远程瘦客户端,连权限提示都经 bridgePermissionCallbacks 远程回传;(4) 浏览器'computer use'经 Claude-in-Chrome 扩展 + MCP 而非内置浏览器驱动。借鉴点:把 Agent 引擎与表层彻底解耦、定义 stream-json 作为唯一契约,所有端消费同一协议。但若'网页优先',应把核心做成可独立运行的服务(本仓核心仍是 CLI 进程,网页靠桥接,延迟与状态同步是其妥协)。",
+  "standout_techniques": [
+    {
+      "name": "async-generator 主循环(query/queryLoop + yield*)",
+      "what": "整个 agent 回合是一条 async generator:流式 token、工具进度、压缩边界、子代理通知全部 yield 成统一事件流;abortController.signal 实现任意时刻中断,.return() 实现提前完成,可变 State 在迭代顶部解构以简化 7 处 continue。",
+      "why_borrow": "这是构建可中断、可流式、可组合 agent 循环的最干净范式;比'回调地狱'或'同步 while'更易插入压缩/权限/中断逻辑,直接照搬到任何语言的协程实现。"
+    },
+    {
+      "name": "三级渐进式上下文压缩 + cache-editing microcompact",
+      "what": "snip→microcompact→autocompact 分级:microcompact 只按 tool_use_id 清空旧 tool_result 内容(保结构),优先用 cache-editing API 原地删除而不重写整段以保住 prompt cache;autocompact 在 effectiveWindow(= 窗口 - 摘要预留)处触发 LLM 摘要并打边界,只取边界后消息。",
+      "why_borrow": "长会话不爆上下文且 cache 命中率高 = 省钱省延迟;'按 tool_use_id 原地清内容而非重写'是降低 cache break 的关键技巧,任何长上下文 Agent 都该学。"
+    },
+    {
+      "name": "fork-subagent 共享父 prompt cache",
+      "what": "省略 subagent_type 即 fork:继承父上下文、共享父 prompt cache(故禁止改 model),后台运行把工具噪声挡在父上下文外,完成后以 user-role <task-notification> 回灌结果;系统提示明令'别偷看 output_file、别预测结果'。",
+      "why_borrow": "既要并行/隔离上下文,又不想为每个子任务重建昂贵 cache —— fork 共享 cache 把'开子代理'成本压到接近免费,是上下文经济学的高阶玩法。"
+    },
+    {
+      "name": "只读/写并发分批调度(partitionToolCalls)",
+      "what": "同一轮 tool_use 按 isConcurrencySafe 切批:只读批用 generators.all() 并发(上限可调),写操作串行,并发批的 context 修改在批末统一合并,避免写竞态。",
+      "why_borrow": "一句'按工具语义决定并发'就同时拿到性能(并发读)与正确性(串行写),实现简单(reduce 分批),是工具执行层的标准最佳实践。"
+    },
+    {
+      "name": "两段式权限 + LLM 安全分类器 + 模式机",
+      "what": "validateInput()(模型可见的失败原因)与 checkPermissions()(用户授权)分离;权限模式 default/acceptEdits/plan/bypass + auto;auto 模式用 LLM bashClassifier 把命令分类 allow/ask/deny,叠加 dangerousPatterns 硬黑名单与 shell 规则匹配(Bash(git *))。",
+      "why_borrow": "个人 Agent 要敢自动执行就必须有这套分层授权;'规则匹配 + LLM 分类 + 硬黑名单'三道闸 + 可切换信任模式,是平衡自动化与安全的成熟答案。"
+    },
+    {
+      "name": "ToolSearch 延迟加载 + Skill 1% 预算发现",
+      "what": "工具/MCP 过多时标 defer_loading,模型按 searchHint 关键词搜索后再加载全 schema;Skills 列表只占 1% 上下文做发现,调用时才载全文。",
+      "why_borrow": "扩展能力随插件爆炸增长时,'发现用摘要、调用才加载'能把 turn-1 token 与 cache 成本压住,是可扩展工具生态的必备机制。"
+    },
+    {
+      "name": "coordinator/worker 编排 + 强制独立验证契约",
+      "what": "主 Agent 退化为协调者(只能派发/续聊/停止 worker),工作流固化为'并行研究→自己综合写自洽 spec→worker 实现→独立对抗式验证打 PASS/FAIL';系统提示禁止自评 PASS、禁止编造未返回的 worker 结果。",
+      "why_borrow": "把'综合理解必须自己做、验证必须独立'写进编排协议,直接对治多代理系统'互相鼓掌、幻觉完成'的通病。"
+    },
+    {
+      "name": "hooks 生命周期扩展(可执行 shell/HTTP/prompt)",
+      "what": "PreToolUse/PostToolUse/SessionStart/Stop/SubagentStart/SubagentStop/UserPromptSubmit/StatusLine 等事件,可挂 shell/HTTP/prompt 钩子(execAgentHook/execHttpHook/execPromptHook),frontmatter/plugin/skill 均可注册,带 ssrfGuard。",
+      "why_borrow": "让用户'每次 X 就自动 Y'的自动化诉求落到 harness 执行而非模型记忆,是把 Agent 嵌入个人工作流的关键扩展点。"
+    },
+    {
+      "name": "超大工具结果落盘 + 预览回灌",
+      "what": "工具结果超 maxResultSizeChars 即落盘,只把'文件路径 + 预览'回灌给模型(toolResultStorage),Read 等自限工具设 Infinity 防 Read→file→Read 死循环。",
+      "why_borrow": "防单次巨型输出撑爆上下文的简单有效手段,边界 case(自引用循环)处理值得照抄。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "闭源单体、强耦合:main.tsx 单文件 803KB、cli/print.ts 212KB、query.ts 68KB,大量逻辑塞进巨文件,且遍布 `feature(...)`/`USER_TYPE==='ant'` 内部门控与死代码消除标记——这是构建产物式组织,不要模仿其文件粒度;自建时按域拆分模块。",
+    "厂商锁定:provider 抽象只覆盖 Anthropic 系(firstParty/bedrock/vertex/foundry),非通用多厂商(无 OpenAI/Gemini 一等公民)。个人全平台 Agent 应一开始就抽象出 provider 接口,避免被单一 SDK 协议(beta messages/cache 语义)绑死。",
+    "'网页优先'是其短板:核心是 CLI 进程,网页/移动/桌面靠 bridge 远程驱动 CLI(WebSocket 桥接 + 远程权限回传),引入延迟、状态同步与连接可靠性复杂度。若你要网页优先,应把 Agent 引擎做成独立服务/库,而非桥接一个终端进程。",
+    "能力偏科:为软件工程深度定制,写文章/computer use 基本是外置(浏览器扩展/MCP)或缺位。直接套用会得到一个'很会写代码但不擅长写作/操作电脑'的 Agent;五大能力需各自补专用工具与提示。",
+    "ink/TUI 资产几乎不可复用到网页:146 个 components 目录全是 ink(终端 React)组件,与 DOM/React-web 不通用。网页端 UI 要另起炉灶,只能复用其'消息流/工具渲染/权限对话'的信息架构而非代码。",
+    "重度依赖 Statsig/GrowthBook 远程特性门与 Anthropic 内部服务(分析、限额、CCR 云会话、Claude-in-Chrome),许多路径在脱离 Anthropic 基础设施后是 stub 或失效(如 bashClassifier 外部构建为 stub)。把它当能力清单参考,而非可运行底座。",
+    "巨型可变状态与全局单例(bootstrap/state.js、AppState、cost-tracker 全局累计、module-level env 捕获)使测试与并发复杂;自建时优先依赖注入(本仓部分已用 deps/productionDeps,但不彻底)。"
+  ],
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/query.ts",
+      "role": "Agent 主循环:query()→queryLoop() 双层 async generator,串起压缩、调模型、工具执行、回灌、中断"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/QueryEngine.ts",
+      "role": "查询引擎:把内部 Message 流转成 SDK 协议消息(SDKMessage/compact boundary),管理 usage/cost/thinking 配置"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/Tool.ts",
+      "role": "统一 Tool<Input,Output> 接口定义(call/checkPermissions/isConcurrencySafe/render*/maxResultSizeChars 等)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/services/tools/toolOrchestration.ts",
+      "role": "工具调度:partitionToolCalls 按只读/写分批,只读并发(generators.all,上限 10)、写串行"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/services/tools/toolExecution.ts",
+      "role": "单个工具执行 runToolUse() 生成器(权限校验、流式进度、错误处理)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/generators.ts",
+      "role": "并发原语 all()(带 concurrencyCap 的 generator 竞速合流),驱动只读工具并发"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/tools/AgentTool/runAgent.ts",
+      "role": "子代理运行:createSubagentContext 隔离上下文、连接 agent 专属 MCP、记录 sidechain transcript"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/tools/AgentTool/forkSubagent.ts",
+      "role": "fork 子代理机制:继承父上下文并共享 prompt cache(核心成本优化)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/tools/AgentTool/prompt.ts",
+      "role": "子代理/fork 的提示工程:何时 fork、别偷看 output_file、别预测结果、自洽 briefing"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/coordinator/coordinatorMode.ts",
+      "role": "coordinator/worker 多代理编排模式 + 系统提示(研究→综合→实现→独立验证工作流)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/services/compact/autoCompact.ts",
+      "role": "自动压缩:effectiveWindow 阈值计算、LLM 摘要、compact boundary"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/services/compact/microCompact.ts",
+      "role": "微压缩:按 tool_use_id 用 cache-editing API 原地清空旧 tool_result 内容、保 cache"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/memdir/memdir.ts",
+      "role": "持久记忆 MEMORY.md(入口上限/类型/异步预取相关记忆)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/constants/prompts.ts",
+      "role": "系统提示组装(分段缓存、Tone、安全、忠实报告、子代理规约、验证契约、--dump 支持)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/types/permissions.ts",
+      "role": "权限类型与模式(default/acceptEdits/plan/bypass/auto/bubble)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/permissions/",
+      "role": "权限规则引擎目录(规则解析、shell 匹配、shadowed 检测、危险模式、bash 分类器、killswitch)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/hooks/useCanUseTool.tsx",
+      "role": "权限决策汇总:allow/ask/deny 分支与 PreToolUse 集成"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/hooks/hookEvents.ts",
+      "role": "hooks 事件系统(PreToolUse/PostToolUse/SessionStart/Stop/SubagentStart/Stop/StatusLine 等)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/model/providers.ts",
+      "role": "模型 provider 抽象(firstParty/bedrock/vertex/foundry 切换、first-party URL 判定)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/toolSearch.ts",
+      "role": "ToolSearch 延迟加载(defer_loading + 阈值 + 关键词发现),控制工具 schema 体积"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/tools/SkillTool/prompt.ts",
+      "role": "Skill 发现机制(1% 上下文预算列表,调用时才加载全文)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/sessionStorage.ts",
+      "role": "会话持久化(JSONL transcript、parentUuid 链、sidechain 子目录、50MB 读保护)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/cost-tracker.ts",
+      "role": "成本追踪(各模型 usage/cost 累计、按会话存取 project config、resume 恢复)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/entrypoints/cli.tsx",
+      "role": "CLI 入口(--version/--print/--dump-system-prompt 快路径,动态 import 优化启动)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/cli/print.ts",
+      "role": "无头编排入口(--print + stream-json stdin/stdout,SDK/CCR 集成)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/ink.ts",
+      "role": "TUI 渲染入口(ink render/createRoot + ThemeProvider 包裹)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/bridge/bridgeMain.ts",
+      "role": "远程桥接(把本地 CLI 会话桥到云端 CCR,供移动/桌面/网页瘦客户端)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/cli/transports/HybridTransport.ts",
+      "role": "跨端传输(WebSocket/SSE 混合,远程会话通信)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/entrypoints/sandboxTypes.ts",
+      "role": "沙箱配置类型(网络/文件系统/代理,平台相关 macOS/Linux)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/utils/plugins/pluginLoader.ts",
+      "role": "插件加载(完整 marketplace/版本/策略/依赖体系的核心装载器)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/claudecode/constants/outputStyles.ts",
+      "role": "输出风格/写作人格(explanatory/learning 等可切换 persona),写作能力雏形"
+    }
+  ]
+}

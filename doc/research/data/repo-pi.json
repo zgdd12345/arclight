@@ -1,0 +1,163 @@
+{
+  "repo": "https://github.com/earendil-works/pi",
+  "one_liner": "pi 是一个自扩展 AI coding agent monorepo，以三层解耦架构（统一多 provider LLM API / 通用 agent 运行时 / 交互式 CLI）为核心，支持 TypeScript 扩展插件在运行时动态注册工具、provider 和命令。",
+  "positioning": "定位为\"agent 基础设施库 + 参考实现\"：pi-ai 可独立作为多 provider LLM 流式客户端，pi-agent-core 可独立作为与 UI 无关的 agent 运行时，pi-coding-agent 在上层提供完整的交互式 CLI/RPC/print 多端体验。三层均为 MIT 开源，适合作为自建 agent 平台的骨架。",
+  "primary_language": "TypeScript (Node.js ≥ 22.19.0，ESM，编译工具 tsgo；可打包为 Bun 单二进制)",
+  "stack": "TypeScript + Node.js/Bun ESM monorepo；typebox (TypeBox JSON Schema 验证)；yaml；jiti (运行时 TS 模块加载用于扩展)；highlight.js；diff；undici；proper-lockfile；@silvia-odwyer/photon-node (图像处理)；pi-tui (自研差分渲染 TUI 库)",
+  "license": "MIT",
+  "architecture": {
+    "agent_loop": "packages/agent/src/agent-loop.ts 实现纯函数式双层循环：外层处理 follow-up 消息队列，内层处理 tool-call 轮次与 steering 消息注入。每轮：transformContext → convertToLlm → streamSimple → 解析 tool calls → executeToolCalls(sequential/parallel 可配置) → emit turn_end → shouldStopAfterTurn。Agent 类(agent.ts)是其有状态包装，持有 steeringQueue/followUpQueue 两个可配置 drain 模式的消息队列，支持 prepareNextTurn 钩子在每轮动态切换 model/context。",
+    "tool_system": "工具由 AgentTool<TSchema> 接口描述，含 execute(toolCallId, params, signal, onUpdate) + 可选 prepareArguments 兼容垫片 + 可选 executionMode('sequential'|'parallel') 覆盖。内置 7 个工具：read/bash/edit/write/grep/find/ls，全部通过 createXxxToolDefinition(cwd, opts) 工厂创建。AgentLoopConfig.beforeToolCall / afterToolCall 提供全局拦截点。扩展可通过 ExtensionAPI.registerTool() 注册自定义工具，并提供 renderCall/renderResult TUI 渲染组件。",
+    "context_memory": "上下文管理分两层：(1) transformContext hook 在调用 LLM 前对 AgentMessage[] 做裁剪/注入；(2) compaction 模块(packages/coding-agent/src/core/compaction/)在超过阈值时调用 LLM 生成摘要，写入 session JSONL 的 CompactionEntry，重载后只保留摘要后的消息；session 还支持分支树导航(navigateTree)与分支摘要(BranchSummaryEntry)，允许非线性对话历史。文件操作跟踪(readFiles/modifiedFiles)被编码进 CompactionDetails 以供下次摘要参考。",
+    "provider_abstraction": "packages/ai 提供三级抽象：(1) types.ts 定义 Model<TApi>/Context/Message/AssistantMessageEvent 统一数据结构；(2) api-registry.ts 维护 api-string → ApiProvider 的全局注册表，registerApiProvider/unregisterApiProviders 可在运行时增删 provider；(3) providers/ 目录每个文件实现 stream<Xxx>() + streamSimple<Xxx>()，通过 register-builtins.ts 以懒加载包装器注册，避免启动时全量 import。内置支持 anthropic-messages / openai-completions / openai-responses / azure-openai-responses / openai-codex-responses / google-generative-ai / google-vertex / bedrock-converse-stream / mistral-conversations。KnownProvider 类型包含 30+ 提供商名称（openrouter/fireworks/together/deepseek/groq/cerebras/cloudflare 等）。thinkingLevel('off'|'minimal'|'low'|'medium'|'high'|'xhigh') 统一映射到各 provider 具体参数。",
+    "execution_sandbox": "pi 自身不内置沙箱；README 给出三种容器化模式：OpenShell(进程级 policy)、Gondolin extension(host 持有 auth，工具路由到 Linux micro-VM)、Plain Docker(整体容器化)。bash 工具在 host 进程权限下直接执行。trust-manager.ts 用 JSON 文件 + proper-lockfile 记录项目目录信任决策，防多 session 并发写冲突。",
+    "ui_surface_layers": "四种运行模式共享同一 AgentSession 核心：(1) interactive TUI — packages/tui 差分渲染 + packages/coding-agent/src/modes/interactive/，含 footer/header/widget/overlay 等可插拔 TUI 组件；(2) print mode — 纯文本/ANSI 输出；(3) rpc mode — stdin/stdout JSONL 协议，供外部程序嵌入使用(rpc-types.ts 定义全套命令/响应类型)；(4) json mode。扩展可通过 ExtensionUIContext 接口调用 select/confirm/input/notify/setWidget/setFooter/setHeader/custom TUI 原语，跨模式抽象屏蔽底层实现。",
+    "extensibility_plugins": "扩展以 TypeScript 文件形式存放于 ~/.pi/agent/extensions/ 或 .pi/extensions/，由 jiti(static) 在运行时动态加载，无需预编译；Bun 单二进制模式通过 virtualModules 将打包内的依赖暴露给外部扩展脚本。ExtensionFactory(pi: ExtensionAPI) => void|Promise<void> 是入口；ExtensionAPI 提供：on(event, handler) 订阅 30+ 生命周期事件、registerTool/registerCommand/registerShortcut/registerFlag、registerProvider/unregisterProvider(含 OAuth 支持)、registerMessageRenderer、sendMessage/sendUserMessage/appendEntry、events(EventBus 跨扩展通信)。所有钩子均可阻塞、变换或取消对应操作。",
+    "multi_agent": "无内置多 agent 编排框架；官方 example (examples/extensions/subagent/index.ts) 展示了扩展级 subagent 工具：通过 spawn('pi', ['--rpc', ...]) 启动独立 pi 进程，JSON RPC 控制，支持 single/parallel(最多 4 并发)/chain 三种调度模式，每个子 agent 有独立 context window。尚无声明式 DAG/orchestrator 抽象，属轻量外挂模式。",
+    "session_persistence": "会话以 JSONL 文件存储于 ~/.pi/agent/sessions/，每条记录为 SessionEntry(message|thinking_level_change|model_change|compaction|branch_summary|custom)，header 含 id/timestamp/cwd/parentSession。session-manager.ts 提供流式追加写、随机读、分支查找。支持 fork(从任意 entryId 分叉)、navigateTree(非线性跳转)、switch(切换到其他 session 文件)、clone。exports HTML 功能输出含样式的对话记录。",
+    "permission_security": "无内置权限系统；依赖 OS/容器隔离。trust-manager.ts 维护目录级信任决策 JSON(true/false/null)，使用 lockfile 防并发写。供应链安全：所有直接依赖精确版本锁定，npm-shrinkwrap.json 锁定传递依赖，--ignore-scripts 安装，CI 运行 npm audit，pre-commit 阻止意外 lockfile 变更。",
+    "prompt_engineering": "system-prompt.ts 的 buildSystemPrompt() 组装：默认工具描述段(含 toolSnippets 单行摘要) + guidelines 段(可通过 promptGuidelines 追加) + <project_context>(从 .pi/context/ 读取 .md 文件) + <available_skills> XML 段(skills 发现结果) + appendSystemPrompt + 日期 + cwd。Skills 系统(skills.ts)：SKILL.md 文件作为 skill 定义，frontmatter 含 name/description/disable-model-invocation，格式化为 XML 注入 system prompt，agent 在 read 工具调用时按需加载完整 skill 指令。prompt-templates.ts 支持 .md 文件模板扩展。AGENTS.md 是面向 agent 的项目规则文件。"
+  },
+  "standout_techniques": [
+    {
+      "name": "懒加载 provider 注册 (Lazy Provider Registry)",
+      "what": "register-builtins.ts 用 Promise 包装每个 provider 的动态 import()，首次调用时才加载对应模块；api-registry.ts 的 registerApiProvider/unregisterApiProviders 支持运行时增删 provider，扩展可在不重启的情况下注册私有 API 端点或覆盖已有 provider。",
+      "why_borrow": "全平台 agent 必须支持多 provider，懒加载能显著缩短冷启动时间，运行时注册则让插件/扩展动态扩展 provider 而无需 fork 主项目。"
+    },
+    {
+      "name": "Self-extensible Skills 系统",
+      "what": "Skills 是放在 .pi/skills/ 或用户全局目录下的 Markdown 文件(SKILL.md + frontmatter)，name/description 被格式化为 <available_skills> XML 注入 system prompt，agent 通过 read 工具按需加载完整指令；disable-model-invocation 标志允许 skill 仅通过 /skill:name 命令显式触发。整个 agent 本身也是其 skill 库的消费者，可用自己的 coding 能力扩充自己的 skill 集。",
+      "why_borrow": "实现了 agent 能力的声明式、文件级管理，用户只需写 Markdown 即可扩展 agent；skill 按需加载而非全部塞入 context，节省 token。"
+    },
+    {
+      "name": "Steering/Follow-up 双队列消息注入",
+      "what": "Agent 持有两个独立 PendingMessageQueue(可配置 'all'|'one-at-a-time' drain 模式)：steeringQueue 在当前 turn 完成后立即注入(用于运行中干预)，followUpQueue 在 agent 即将停止时注入(用于后续追加任务)。两种队列语义清晰分离，并通过 getSteeringMessages/getFollowUpMessages 回调与 agent 循环解耦。",
+      "why_borrow": "支持用户在 agent 运行中实时干预而不打断当前 tool 执行，适合 computer use / 长任务规划场景的人机协作模式。"
+    },
+    {
+      "name": "AgentMessage TypeScript 声明合并扩展",
+      "what": "CustomAgentMessages 接口默认为空，通过 TypeScript declaration merging 允许应用扩展消息类型(如 ArtifactMessage / NotificationMessage)，AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages]。convertToLlm 过滤器只向 LLM 发送标准角色消息，自定义消息类型纯用于本地 UI/持久化。",
+      "why_borrow": "在不引入 class 继承的前提下实现类型安全的消息类型扩展，保持核心运行时零依赖于上层业务类型。"
+    },
+    {
+      "name": "JSONL 会话树 + 非线性 navigateTree",
+      "what": "每条 session entry 含 id/parentId，支持分叉(fork)、树导航(navigateTree 可回到任意历史节点并自动生成分支摘要)、会话切换。BranchSummaryEntry 在分支合并时用 LLM 自动生成摘要，保留上下文语义。",
+      "why_borrow": "非线性历史树是长周期规划/调研任务的关键能力，允许用户探索不同解题路径，配合 compaction 可在极长会话中保持有效 context。"
+    },
+    {
+      "name": "RPC 模式 JSONL 协议嵌入接口",
+      "what": "rpc-mode.ts 将 AgentSession 通过 stdin/stdout JSONL 协议暴露，rpc-types.ts 完整定义命令(prompt/steer/follow_up/abort/compact/bash/fork/navigateTree等)与响应/事件类型，支持 extension UI 请求的双向交互。rpc-client.ts 提供对应的客户端封装。",
+      "why_borrow": "使 agent 核心可作为后端进程被任意语言的前端(Web/Electron/VSCode 插件)驱动，天然适配全平台架构目标。"
+    },
+    {
+      "name": "jiti 运行时扩展加载 + Bun 二进制虚拟模块",
+      "what": "extensions/loader.ts 用 jiti/static 在 Node.js 下运行时编译加载 TypeScript 扩展文件，无需预构建；Bun 单二进制模式通过 virtualModules 将打包内的 pi-agent-core/pi-ai/pi-tui/typebox 等依赖映射给外部扩展脚本，实现'发布单文件可执行但扩展仍用 TypeScript 编写'的体验。",
+      "why_borrow": "大幅降低扩展开发门槛，直接用 TypeScript 编写、无需构建步骤，同时保证二进制发布的简洁性。"
+    },
+    {
+      "name": "ThinkingLevel 统一推理抽象",
+      "what": "定义 6 档 thinkingLevel ('off'|'minimal'|'low'|'medium'|'high'|'xhigh')，Model.thinkingLevelMap 将每档映射到 provider 具体参数(token budget / effort 字符串 / null=不支持)，xhigh 需显式支持声明。ThinkingBudgets 允许覆盖每档 token 预算。getSupportedThinkingLevels() 从模型元数据动态计算可用档位。",
+      "why_borrow": "不同 provider 的推理控制 API 差异极大(Anthropic 用 budget_tokens，OpenAI 用 reasoning_effort，Google 用 thinking_config)，统一抽象层可让上层 UI/逻辑与 provider 解耦。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "无内置权限系统：bash 工具以启动进程的用户权限直接执行任意命令，安全边界完全依赖外部容器化，不适合直接暴露给不可信输入；自建全平台 agent 应在 beforeToolCall 钩子或独立权限层实现细粒度控制。",
+    "多 agent 编排为外挂而非一等公民：subagent 示例通过 spawn('pi', ['--rpc']) 实现，缺乏声明式 DAG / 结构化任务分配 / 跨 agent 结果聚合抽象，在复杂调研/规划任务中扩展困难。",
+    "无原生网页/桌面 UI：ui 层目前仅有 TUI(终端) + RPC(需要外部客户端)，缺乏内置 Web/Electron 前端；'全平台'需借助外部项目(pi-chat、Gondolin extension 等)。",
+    "Computer use 能力不在本仓库内：没有屏幕截图/鼠标键盘控制工具，computer use 需通过自定义扩展工具注册实现，与 Claude Computer Use API 的集成需要自行开发。",
+    "Context 管理依赖 token 估算而非精确计数：estimateContextTokens 基于启发式估算而非实际 tokenizer，compaction 触发时机可能不准确，在大 context 场景下需特别测试。",
+    "扩展间隔离不足：多个扩展共享同一进程和 ExtensionAPI 实例，扩展崩溃可能影响主进程，registerProvider 被恶意扩展滥用时无沙箱隔离；生产级 agent 平台应考虑扩展进程隔离。",
+    "Session JSONL 无加密/访问控制：对话历史(含工具输出、文件内容等敏感信息)以明文 JSONL 存储在本地，跨用户共享或云同步场景需自行处理数据安全。",
+    "写代码以外的能力需完全靠扩展和 skills 补全：内置工具集(read/bash/edit/write/grep/find/ls)专为 coding 场景设计，调研(web search)、写作(document management)、日常规划(calendar/task)等能力均不在核心包内，开发全能 agent 需大量自行集成。"
+  ],
+  "capability_coverage": {
+    "code": "原生支持，内置 read/bash/edit/write/grep/find/ls 工具，bash 工具支持完整 shell 执行，edit 工具有 diff 渲染；compaction 和 session 树为长编码任务提供持久化支持。覆盖度：高。",
+    "writing": "无专用写作工具，但 read/write/bash 足以支持文档生成；skills 系统可注入写作 persona/格式规范；RPC 模式可与富文本编辑器集成。需自行补充草稿管理、格式化等辅助工具。覆盖度：中。",
+    "research": "无内置 web search/fetch 工具；bash 工具可间接调用 curl/python，但体验较差；subagent 示例可并行分发调研子任务。需通过扩展注册 web search/browser 工具。覆盖度：低-中。",
+    "computer_use": "本仓库无 computer use 能力；Gondolin extension 项目将工具路由到 VM 可实现隔离执行，但屏幕控制/图像识别需外部集成。覆盖度：无。",
+    "planning": "通过 bash/write 工具可生成规划文档；session 树的非线性导航和分支摘要支持规划探索；follow-up 消息队列支持任务链；steering 消息支持运行中调整计划。缺乏日历/提醒/任务管理集成。覆盖度：中。"
+  },
+  "cross_platform_approach": "核心运行时为 Node.js ESM 包，可打包为 Bun 单二进制(支持 macOS/Linux/Windows)。多端接入通过运行模式解耦：interactive TUI(终端直用)、print mode(脚本集成)、RPC JSONL 模式(任意语言客户端驱动，适合 Web/Electron/VSCode 插件)、json mode(CI/自动化)。Web UI 和桌面 UI 不在本仓库内，需通过 RPC 模式对接外部前端。扩展系统(jiti + virtualModules)使插件无需重新构建主包即可在 Node.js 和 Bun 环境下运行。",
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/agent/src/agent-loop.ts",
+      "role": "agent 主循环纯函数实现：双层 while 循环处理 turn / tool call / steering / follow-up 消息，agentLoop() 和 agentLoopContinue() 两个入口"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/agent/src/agent.ts",
+      "role": "Agent 类：agentLoop 的有状态包装，持有 transcript/tools/steeringQueue/followUpQueue，暴露 prompt()/steer()/followUp()/abort()/subscribe() API"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/agent/src/types.ts",
+      "role": "agent 运行时核心类型：AgentTool/AgentContext/AgentMessage/AgentEvent/AgentLoopConfig/ThinkingLevel 等全部定义"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/ai/src/types.ts",
+      "role": "pi-ai 全局类型文件：Model/Context/Message/AssistantMessageEvent/StreamOptions/ThinkingLevel/Api/Provider 及各 compat 接口"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/ai/src/api-registry.ts",
+      "role": "provider 注册表：registerApiProvider/unregisterApiProviders/getApiProvider，支持运行时动态增删 provider"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/ai/src/providers/register-builtins.ts",
+      "role": "内置 provider 懒加载注册：9 种 API 协议均以 Promise 包装动态 import，首次调用才加载实现模块"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/ai/src/stream.ts",
+      "role": "stream()/streamSimple()/complete()/completeSimple() 统一入口，从 registry 查找 provider 后分发调用"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/extensions/types.ts",
+      "role": "扩展系统完整类型：ExtensionAPI(on/registerTool/registerCommand/registerProvider/...)、ExtensionContext/UIContext、全部 30+ 事件类型及结果类型、ToolDefinition、ProviderConfig"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/extensions/loader.ts",
+      "role": "扩展加载器：jiti/static 运行时编译 TS 扩展，virtualModules 供 Bun 二进制使用，管理别名映射"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/skills.ts",
+      "role": "Skills 发现与加载：扫描 SKILL.md 文件，验证 frontmatter，格式化为 <available_skills> XML 注入 system prompt"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/agent-session.ts",
+      "role": "AgentSession：跨所有运行模式的会话核心，集成 compaction/session 树/extension runner/bash executor/model 管理"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/session-manager.ts",
+      "role": "会话持久化：JSONL 追加写/流式读，SessionEntry 树结构，fork/navigateTree/switch/clone 操作"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/compaction/compaction.ts",
+      "role": "上下文压缩：检测阈值 → LLM 生成摘要 → 写入 CompactionEntry，含文件操作追踪(readFiles/modifiedFiles)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/system-prompt.ts",
+      "role": "system prompt 组装：工具描述 + guidelines + project_context 文件 + available_skills XML + appendSystemPrompt + 日期/cwd"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/tools/index.ts",
+      "role": "内置工具注册表：7 种工具的 createXxx() + createXxxToolDefinition() 工厂，createAllToolDefinitions()/createCodingTools() 组合函数"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/modes/rpc/rpc-types.ts",
+      "role": "RPC 协议类型定义：RpcCommand(prompt/steer/compact/fork/navigateTree 等) / RpcResponse / RpcSessionState / RpcExtensionUIRequest"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/src/core/trust-manager.ts",
+      "role": "信任决策管理：目录级 true/false/null 决策持久化，lockfile 防并发写，检测 AGENTS.md/CLAUDE.md 上下文文件"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/coding-agent/examples/extensions/subagent/index.ts",
+      "role": "多 agent 参考实现：spawn pi --rpc 启动子进程，支持 single/parallel(≤4并发)/chain 三种调度模式"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/.pi/skills/add-llm-provider.md",
+      "role": "新增 provider 的 skill 文件，同时是 self-extensible 设计理念的示例：项目用自己的 skill 系统记录扩展步骤"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/pi/packages/agent/src/harness/agent-harness.ts",
+      "role": "AgentHarness：更高层的有状态封装，集成 compaction/session/skills/prompt-templates，适合作为自建 agent 的起点"
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+{
+  "topic": "Computer Use / 浏览器自动化 Agent 2025-2026 SOTA 技术调研",
+  "summary": "Hi Alba，以下是 2025-2026 Computer Use / 浏览器自动化 Agent 领域的 SOTA 综述。\n\n【整体格局】2025-2026 该领域出现三条主线并存：(1) 前沿闭源大模型自带 computer-use 能力（Anthropic Claude、OpenAI CUA、Google Gemini 2.5 Computer Use）；(2) 开源 GUI 原生模型（ByteDance UI-TARS / UI-TARS-2）；(3) 开源/商业浏览器编排框架（browser-use、Stagehand、Skyvern、Steel、Browserbase）。技术路线从早期\"纯视觉截图 + 坐标点击\"逐步收敛为\"视觉 grounding + DOM/可访问性树（accessibility tree）混合\"，并普遍采用\"截图→推理→动作→再截图\"的闭环（agent loop）。\n\n【能力跃迁（以 OSWorld 基准为标尺）】OSWorld 是衡量真实桌面操作的代表基准：早期 OpenAI CUA 约 38%，2025 上半年 Claude Sonnet 4.5 升至 61.4%，2025 年 11 月 Claude Opus 4.5 达 66.3%（P@1, avg@5），成为当前公开最强 computer-use 模型之一。浏览器场景下 WebVoyager 已接近饱和：H Company 的 Surfer 2 报告 97.1% 成功率（pass@10 达 100%），开源 browser-use 约 89%，OpenAI Operator 约 87%，Skyvern 2.0 约 85.85%。视觉 grounding 基准 ScreenSpot-Pro 上 UI-TARS、OmniParser v2（39.5%）、UGround 等竞逐 SOTA。\n\n【厂商动态（含重要变更/弃用）】OpenAI Operator 已于 2025-08-31 下线，能力并入 ChatGPT Agent，并通过 OpenAI Agents SDK 的 computer-use 工具对外开放。Google 于 2025 年 10 月发布 Gemini 2.5 Computer Use 模型（API public preview，Browserbase harness 约 70%+），随后 Project Mariner 项目被关停、能力转交该 API。Anthropic computer-use 工具持续迭代（computer_20250124 → 2025-11-24 beta），需带 anthropic-beta header。\n\n【安全是最大未决问题】这是落地最关键的坑。2025 年 12 月 OpenAI 公开承认：针对 AI 浏览器（如 ChatGPT Atlas）的 prompt injection（提示注入）\"不太可能被彻底解决\"；Brave 揭示 Perplexity Comet 的 indirect prompt injection（间接提示注入）；英国 NCSC 警告该类攻击\"可能永远无法完全缓解\"。业界共识：sandbox（沙箱）无法阻止注入本身，只能限制\"爆炸半径\"（blast radius）。E2B（Firecracker microVM）、Browserbase、Steel 等提供隔离运行时。\n\n【对\"网页端优先的全平台个人 AI Agent\"的核心判断】建议采用\"DOM/accessibility-tree 优先 + 视觉兜底\"的混合架构，模型层用 Claude（computer-use 最强）或 Gemini 2.5 Computer Use（成本低、Web/Android 强、自带分步安全服务），执行层用 browser-use 或 Stagehand 编排，部署在隔离沙箱中并对高危动作（支付、删除、邮件外发）强制人工确认。",
+  "sota_techniques": [
+    {
+      "name": "Anthropic Claude Computer Use (computer_20250124 / 2025-11-24 beta)",
+      "description": "前沿闭源模型自带的 computer-use 工具，纯视觉截图驱动，支持鼠标移动/点击/拖拽、键盘输入、scroll、hold_key、triple_click、wait、left_mouse_down/up 等细粒度动作。Claude Sonnet 4.5 在 OSWorld 达 61.4%，Claude Opus 4.5（2025-11）达 66.3%（P@1, avg@5），是当前公开最强 computer-use 模型之一。可保持长任务专注（官方称 30+ 小时多步任务）。调用需带 anthropic-beta header（computer-use-2025-11-24）。",
+      "maturity": "生产可用（beta 工具，API 全面开放）",
+      "projects": "Anthropic API / Claude（claude-opus-4-5、claude-sonnet-4-5/4-6），官方参考实现 anthropic-quickstarts/computer-use-demo",
+      "url": "https://docs.anthropic.com/en/docs/build-with-claude/computer-use"
+    },
+    {
+      "name": "OpenAI Computer-Using Agent (CUA) / ChatGPT Agent",
+      "description": "OpenAI 的 computer-use 模型，结合 GPT-4o 视觉 + 强化学习训练的 GUI 交互推理。2025-01 以 Operator 研究预览发布（WebArena ~58%、OSWorld ~38%、WebVoyager ~87%）。Operator 产品已于 2025-08-31 下线，能力并入 ChatGPT Agent，并通过 OpenAI Agents SDK 的 computer-use 工具对开发者开放。",
+      "maturity": "生产可用（产品形态从 Operator 迁移到 ChatGPT Agent + Agents SDK）",
+      "projects": "OpenAI Agents SDK（computer-use 工具）、ChatGPT Agent",
+      "url": "https://openai.com/index/computer-using-agent/"
+    },
+    {
+      "name": "Google Gemini 2.5 Computer Use",
+      "description": "基于 Gemini 2.5 Pro 视觉理解的专用 computer-use 模型，2025-10 发布，API public preview（Google AI Studio + Vertex AI）。通过 computer_use 工具在 loop 中运行（输入：用户请求 + 截图 + 近期动作历史）。Web/Android UI 控制基准领先且延迟更低（Online-Mind2Web ~225s、Browserbase harness ~70%+）。内置每步推理时安全服务，可对高危动作要求拒绝/确认。计费约 $1.25/百万输入 token，可本地 Playwright 起步、Cloud Run + Browserbase 生产部署。Project Mariner 关停后能力转交此 API。",
+      "maturity": "公开预览（API 开放，生产路径明确）",
+      "projects": "Gemini API（computer_use 工具）、参考样例 github.com/pmbstyle/gemini-browser-agent",
+      "url": "https://blog.google/technology/google-deepmind/gemini-computer-use-model/"
+    },
+    {
+      "name": "browser-use",
+      "description": "最热门开源浏览器 Agent 库（Python，~97.8k stars，v0.12.9 / 2026-05）。让 LLM 用自然语言驱动真实浏览器，基于 Playwright，混合使用 DOM 操作 + accessibility tree 进行元素检测，避免脆弱的 CSS/XPath。支持 Claude、Gemini、OpenAI、本地 Ollama，以及自研 ChatBrowserUse 模型。WebVoyager ~89%。已通过 SOC 2 Type 2，推出 Browser Use Desktop 桌面应用。",
+      "maturity": "成熟开源 + 商业云（生产广泛使用）",
+      "projects": "github.com/browser-use/browser-use（含 web-ui 子项目）",
+      "url": "https://github.com/browser-use/browser-use"
+    },
+    {
+      "name": "ByteDance UI-TARS / UI-TARS-2",
+      "description": "开源 GUI 原生 Agent 模型（Apache-2.0），纯截图输入、端到端输出动作，无需 GPT-4o + 专家 prompt 框架。UI-TARS-2（2025-09，arXiv:2509.02544）采用多轮强化学习，OSWorld 47.5%、AndroidWorld 73.3%、Online-Mind2Web 88.2%；ScreenSpot Pro 38.1（grounding SOTA 级）。UI-TARS-desktop 提供完整 stack（模型+框架+桌面/浏览器运行时+MCP+行为日志），~33.5k stars，是最大开源 GUI agent 项目。",
+      "maturity": "成熟开源（模型权重 + 全栈开放）",
+      "projects": "github.com/bytedance/UI-TARS、github.com/bytedance/UI-TARS-desktop",
+      "url": "https://github.com/bytedance/UI-TARS"
+    },
+    {
+      "name": "Stagehand v3 (Browserbase)",
+      "description": "开源 AI 浏览器自动化框架（TS + Python，MIT），提供 act / extract / observe / agent 四个原语，用自然语言替代脆弱选择器。v3 移除 Playwright 硬依赖，引入模块化 driver（可用 Puppeteer 或任意 CDP-based driver），新增 self-healing：DOM/布局变化时自动重新调用 LLM 适配而非直接失败。主推 Browserbase 云浏览器部署。",
+      "maturity": "成熟开源 + 商业云",
+      "projects": "github.com/browserbase/stagehand",
+      "url": "https://www.browserbase.com/blog/stagehand-v3"
+    },
+    {
+      "name": "Skyvern",
+      "description": "开源浏览器工作流自动化（AGPL-3.0，~20k+ stars），Playwright 扩展 + Vision LLM + 计算机视觉，不依赖 XPath。2.0 在 WebVoyager 达 85.85%，尤其擅长表单填写。视觉路线适合 DOM 不可靠的视觉密集/老旧站点，单步成本更高换取怪异站点的可靠性。",
+      "maturity": "成熟开源 + 商业",
+      "projects": "github.com/Skyvern-AI/skyvern",
+      "url": "https://github.com/Skyvern-AI/skyvern"
+    },
+    {
+      "name": "Playwright MCP / Chrome DevTools MCP",
+      "description": "两类驱动 Agent 的 MCP 服务器。Playwright MCP（microsoft/playwright-mcp）基于 accessibility tree 返回结构化快照（角色+文本），比截图更省 token、更稳，适合'用户视角'操作。Chrome DevTools MCP（Google，2025-09）基于 Puppeteer + CDP，提供约 29 个工具（导航/输入/网络/性能 trace/Lighthouse），适合'浏览器内部视角'调试。二者互补。",
+      "maturity": "生产可用（官方维护）",
+      "projects": "github.com/microsoft/playwright-mcp、Chrome DevTools MCP",
+      "url": "https://github.com/microsoft/playwright-mcp"
+    },
+    {
+      "name": "视觉 Grounding 模型 (OmniParser v2 / UGround / GUI-Actor)",
+      "description": "将截图解析为可交互元素的坐标/边界框，是纯视觉 Agent 的关键组件。OmniParser v2（microsoft/OmniParser）ScreenSpot-Pro 39.5%；UGround-V1（OSU-NLP，ICLR'25 Oral，Qwen2-VL）显著刷新 ScreenSpot-Pro（18.9→31.1）；Set-of-Mark (SoM) prompting + OCR + 元素检测是主流增强手法；GUI-Actor 探索 coordinate-free grounding。",
+      "maturity": "研究成熟，部分可生产（开源权重）",
+      "projects": "github.com/microsoft/OmniParser、github.com/OSU-NLP-Group/UGround",
+      "url": "https://github.com/microsoft/OmniParser"
+    },
+    {
+      "name": "沙箱 / 隔离运行时 (E2B / Browserbase / Steel)",
+      "description": "为 Agent 提供隔离执行环境，限制被劫持后的爆炸半径。E2B 基于 Firecracker microVM（独立内核+网络命名空间，~150ms 启动，月会话从 2024-03 的 4 万增至 2025-03 约 1500 万）；Browserbase / Steel 提供云端 stealth 浏览器（代理轮换、CAPTCHA、隔离）。关键认知：sandbox 不能阻止 prompt injection，只能控制损害范围。",
+      "maturity": "生产可用（商业 + 开源）",
+      "projects": "github.com/e2b-dev/E2B、Browserbase、github.com/steel-dev/steel-browser",
+      "url": "https://github.com/e2b-dev/E2B"
+    },
+    {
+      "name": "评测基准 (OSWorld / WebArena / WebVoyager / Online-Mind2Web / ScreenSpot-Pro)",
+      "description": "OSWorld 衡量真实桌面操作（当前 SOTA Opus 4.5 66.3%）；WebArena 衡量复杂多步 Web 任务（CUA ~58%）；WebVoyager 衡量真实网站浏览（已近饱和，Surfer 2 97.1%）；Online-Mind2Web 衡量真实站点端到端；ScreenSpot-Pro 衡量高分辨率专业软件视觉 grounding；新增 ST-WebAgentBench（安全可信）、SCUBA（Salesforce）、EntWorld（企业 GUI）等关注安全与企业场景。",
+      "maturity": "行业标准基准",
+      "projects": "OSWorld、WebArena、WebVoyager、Mind2Web、ScreenSpot-Pro，聚合榜 leaderboard.steel.dev",
+      "url": "https://leaderboard.steel.dev/"
+    }
+  ],
+  "recommendations_for_user": [
+    "架构采用'DOM/accessibility-tree 优先 + 视觉兜底'混合模式：网页端优先场景下，accessibility tree（Playwright MCP 风格）token 更省、更稳、更确定；仅当 DOM 不可靠（canvas、自定义渲染、老旧站点）时回退到视觉 grounding。不要一上来就走纯截图坐标点击路线，成本与脆弱性都更高。",
+    "模型选型分层：Web 操作主力优先 Claude（computer-use 最强、OSWorld 领先）或 Gemini 2.5 Computer Use（成本低 ~$1.25/M、Web/Android 强、自带每步安全服务）；预算敏感或需自托管/数据合规时用开源 UI-TARS-2（Apache-2.0，可私有部署）。可按任务难度做 Opus/Sonnet/Haiku 式分层路由以控成本。",
+    "执行层不要自己造轮子：直接基于 browser-use（Python 生态最成熟、~98k stars）或 Stagehand v3（TS/Python、self-healing、四原语清晰）做编排。二者都封装了 Playwright/CDP，并支持多模型后端，便于后续换模型。",
+    "把安全做成一等公民而非事后补丁：(1) 高危动作（支付、转账、删除、邮件/消息外发、权限授予、改密码）一律走人工确认（human-in-the-loop）或动作白名单；(2) 在隔离沙箱中运行（E2B Firecracker microVM 或 Browserbase/Steel 云浏览器），按会话/任务隔离；(3) 隔离凭证与浏览器 profile，最小权限，敏感站点单独会话。",
+    "针对 prompt injection 建立纵深防御：默认不信任页面内容中的'指令'，对从页面读取的文本做来源标注/隔离；限制 Agent 可访问的域名（allowlist）；对跨域/跳转到敏感操作时二次确认；记录完整动作审计日志（UI-TARS 的行为日志、各框架的 trace）以便回溯。",
+    "全平台扩展路径：先以网页端（浏览器 Agent）打牢，再用同一'截图→推理→动作'循环 + Computer Use 模型扩展到桌面（OSWorld 能力）与 Android（Gemini Computer Use / UI-TARS-2 的 AndroidWorld 能力）。模型与动作空间可复用，差异主要在执行后端（CDP vs OS 级注入 vs ADB）。",
+    "用基准驱动迭代与防回归：以 WebVoyager / Online-Mind2Web 跟踪 Web 任务成功率，OSWorld 跟踪桌面能力，并引入 ST-WebAgentBench 一类安全基准做安全回归；自建一套贴合你高频真实任务的私有评测集，避免只看公开榜单（部分已近饱和）。",
+    "成本与延迟工程化：视觉/截图 loop 每步都是 token 大头，优先用 accessibility-tree 快照减少视觉调用；缓存稳定动作（Stagehand self-healing 思路）、限制最大步数、对长任务做分段与检查点，避免单任务 token 失控。"
+  ],
+  "caveats": [
+    "Prompt injection（含 indirect/间接注入）是当前未解的根本性风险：OpenAI 公开承认对 AI 浏览器'不太可能被彻底解决'，英国 NCSC 称'可能永远无法完全缓解'。任何接触不可信网页内容的个人 Agent 都必须假设会被注入，务必限制爆炸半径并对高危动作人工确认。",
+    "沙箱（sandbox）≠ 安全：sandbox 不能阻止注入发生，只能限制被劫持后的损害范围。需要叠加凭证隔离、域名白名单、动作白名单、人工确认等多层措施。",
+    "公开基准存在饱和与可比性问题：WebVoyager 已被 Surfer 2 等接近 100% 'saturate'，分数高不代表真实复杂任务可靠；不同厂商用不同 harness/步数上限（如 thinking budget、step 上限）报分，OSWorld/WebArena 的数字横向比较需谨慎核对评测设置。",
+    "产品形态变动快：OpenAI Operator 已下线并入 ChatGPT Agent；Google Project Mariner 已关停、能力转交 Gemini 2.5 Computer Use API。不要把架构绑死在某个'产品'上，应绑定到底层模型 + 标准化工具接口（computer-use 工具 / MCP）。",
+    "各厂 computer-use 仍是 beta/preview：Anthropic 需 anthropic-beta header 且工具版本（computer_20250124 / 2025-11-24）会迭代；Gemini Computer Use 为 public preview。接口与计费可能变化，需关注官方 release notes 并做版本兼容封装。",
+    "开源框架许可证差异影响商用：browser-use（MIT 系/宽松）、Stagehand（MIT）相对友好；Skyvern 为 AGPL-3.0（传染性强，商用需评估合规）；UI-TARS 为 Apache-2.0。集成前确认许可证与你的分发模式兼容。",
+    "纯视觉路线成本/延迟更高：截图 + grounding 每步消耗大、延迟高（如 Online-Mind2Web ~225s 量级），Skyvern 视觉路线'单步更贵换可靠'。个人 Agent 高频使用时需做成本预算与降级策略。",
+    "部分数据来自二手/聚合来源，且本调研使用的搜索环境时间标注为 2026 年中：具体 star 数、版本号、价格会随时间变动，落地前请以官方仓库 README、官方文档与定价页的实时数据为准。"
+  ],
+  "sources": [
+    {
+      "title": "Introducing Claude Sonnet 4.5 — Anthropic（OSWorld 61.4%、最强 computer use）",
+      "url": "https://www.anthropic.com/news/claude-sonnet-4-5"
+    },
+    {
+      "title": "Introducing Claude Opus 4.5 — Anthropic",
+      "url": "https://www.anthropic.com/news/claude-opus-4-5"
+    },
+    {
+      "title": "Claude Opus 4.5 System Card (PDF, OSWorld 66.3% 评测设置)",
+      "url": "https://assets.anthropic.com/m/64823ba7485345a7/Claude-Opus-4-5-System-Card.pdf"
+    },
+    {
+      "title": "Anthropic Computer Use API 实操指南（工具版本/动作集）",
+      "url": "https://www.digitalapplied.com/blog/anthropic-computer-use-api-guide"
+    },
+    {
+      "title": "OpenAI — Computer-Using Agent (CUA)",
+      "url": "https://openai.com/index/computer-using-agent/"
+    },
+    {
+      "title": "OpenAI — Introducing Operator",
+      "url": "https://openai.com/index/introducing-operator/"
+    },
+    {
+      "title": "OpenAI — Introducing ChatGPT agent（Operator 并入）",
+      "url": "https://openai.com/index/introducing-chatgpt-agent/"
+    },
+    {
+      "title": "Google DeepMind — Introducing the Gemini 2.5 Computer Use model",
+      "url": "https://blog.google/technology/google-deepmind/gemini-computer-use-model/"
+    },
+    {
+      "title": "Gemini 2.5 Computer Use Is Now an API — How to Build（部署/计费）",
+      "url": "https://byteiota.com/gemini-2-5-computer-use-is-now-an-api-heres-how-to-build-with-it/"
+    },
+    {
+      "title": "browser-use（GitHub 主仓库）",
+      "url": "https://github.com/browser-use/browser-use"
+    },
+    {
+      "title": "ByteDance UI-TARS（GitHub）",
+      "url": "https://github.com/bytedance/ui-tars"
+    },
+    {
+      "title": "UI-TARS-2 Technical Report (arXiv:2509.02544)",
+      "url": "https://arxiv.org/html/2509.02544v1"
+    },
+    {
+      "title": "UI-TARS: Pioneering Automated GUI Interaction with Native Agents (arXiv:2501.12326)",
+      "url": "https://arxiv.org/pdf/2501.12326"
+    },
+    {
+      "title": "microsoft/OmniParser（视觉 grounding，GitHub）",
+      "url": "https://github.com/microsoft/omniparser"
+    },
+    {
+      "title": "OSU-NLP-Group/UGround（ICLR'25 Oral，GitHub）",
+      "url": "https://github.com/OSU-NLP-Group/UGround"
+    },
+    {
+      "title": "Browserbase — Launching Stagehand v3",
+      "url": "https://www.browserbase.com/blog/stagehand-v3"
+    },
+    {
+      "title": "Skyvern-AI/skyvern（GitHub）",
+      "url": "https://github.com/Skyvern-AI/skyvern"
+    },
+    {
+      "title": "microsoft/playwright-mcp（GitHub）",
+      "url": "https://github.com/microsoft/playwright-mcp"
+    },
+    {
+      "title": "e2b-dev/E2B 沙箱运行时（GitHub）",
+      "url": "https://github.com/e2b-dev/E2B"
+    },
+    {
+      "title": "steel-dev/steel-browser（开源浏览器 API，GitHub）",
+      "url": "https://github.com/steel-dev/steel-browser"
+    },
+    {
+      "title": "Browserbase — AI browser prompt injection containment（安全分析）",
+      "url": "https://www.browserbase.com/blog/ai-browser-prompt-injection-containment-security"
+    },
+    {
+      "title": "Brave — Indirect Prompt Injection in Perplexity Comet",
+      "url": "https://brave.com/blog/comet-prompt-injection/"
+    },
+    {
+      "title": "TechCrunch — OpenAI says AI browsers may always be vulnerable to prompt injection",
+      "url": "https://techcrunch.com/2025/12/22/openai-says-ai-browsers-may-always-be-vulnerable-to-prompt-injection-attacks/"
+    },
+    {
+      "title": "Surfer 2: The Next Generation of Cross-Platform Computer Use Agents (arXiv:2510.19949)",
+      "url": "https://arxiv.org/pdf/2510.19949"
+    },
+    {
+      "title": "ST-WebAgentBench: Evaluating Safety and Trustworthiness in Web Agents (arXiv:2410.06703)",
+      "url": "https://arxiv.org/pdf/2410.06703"
+    },
+    {
+      "title": "Steel.dev — AI Agent Benchmark Leaderboards（聚合榜单）",
+      "url": "https://leaderboard.steel.dev/"
+    },
+    {
+      "title": "Can Your AI Actually Use a Computer? 2025 Map of Computer-Use Benchmarks — HackerNoon",
+      "url": "https://hackernoon.com/can-your-ai-actually-use-a-computer-a-2025-map-of-computeruse-benchmarks"
+    }
+  ]
+}

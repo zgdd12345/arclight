@@ -1,0 +1,212 @@
+{
+  "repo": "openai/codex (Codex CLI) — 本地副本位于 /Users/fsm/project/arclightagent/codex",
+  "one_liner": "OpenAI 官方的本地编码 Agent：一个高性能 Rust 内核(codex-core)通过 SQ/EQ 流式协议驱动多种外壳(TUI/exec/MCP server/app-server/桌面/IDE/SDK)，以 seatbelt/landlock/Windows ACL 三平台沙箱 + approval modes 保障安全。",
+  "positioning": "定位为\"运行在用户本机的编码 Agent\"，而非通用个人助理。核心理念是把 Agent 引擎(Codex core)做成与 UI 完全解耦、可被任意前端驱动的库/进程，并把安全(沙箱+审批)作为第一性约束。它是同类开源 Agent 中工程化最重、分层最干净的范本之一(约120个 Rust crate)，特别适合作为\"高性能内核 + 多端外壳 + 强沙箱\"架构的学习蓝本。但它对\"写代码\"以外的能力(写作/调研/computer use/规划)覆盖较浅，需要二次开发。",
+  "primary_language": "Rust(内核与所有外壳)，TypeScript/Python 仅作 SDK 与 npm 安装 shim",
+  "stack": "Rust workspace(tokio 异步、clap CLI、ratatui TUI、reqwest/SSE+WebSocket、rmcp MCP 客户端、deno_core/V8 用于 code-mode、rusqlite 状态库、ts-rs/schemars 导出类型)；Bazel + Cargo 双构建；Nix flake；OpenAI Responses API 为主模型后端；npm/@openai/codex 仅分发预编译二进制。",
+  "license": "Apache-2.0(根 LICENSE 为 Apache 2.0 全文；README/各 package.json 均声明 Apache-2.0；含 NOTICE 文件)",
+  "architecture": {
+    "agent_loop": "两层循环。外层 tasks/regular.rs::RegularTask::run 是 task 级循环(处理 pending input 续跑、发 TurnStarted、消费 startup prewarm);内层 session/turn.rs::run_turn 是 turn 级采样循环——每次向模型发一次 Responses 请求并消费 SSE 流,模型返回 function_call 则执行工具并把输出喂回下一 turn,只返回 assistant message 则 turn 结束。一个 Session 同时只跑一个 Task。turn 前置 run_pre_sampling_compact 做自动压缩。证据:core/src/session/turn.rs、core/src/tasks/regular.rs、docs/protocol_v1.md",
+    "tool_system": "trait ToolExecutor<Invocation> 为统一契约(spec()+执行+exposure());ToolRegistry/ToolRouter(core/src/tools/router.rs)注册并路由;ToolExposure 四态(Direct/Deferred/DirectModelOnly/Hidden)控制工具对模型的可见性,Deferred 工具走 tool_search 动态发现以省 token。内置工具:shell/unified_exec(PTY)/apply_patch(自带 .lark 语法)/view_image/update_plan/web_search/request_user_input/request_permissions/multi_agents 等,均在 core/src/tools/handlers/。并行工具调用由 tools/parallel.rs 支持。",
+    "context_memory": "context_manager/(history.rs+normalize.rs+updates.rs)管理对话历史与规范化;compact.rs/compact_remote.rs/compact_remote_v2.rs 实现本地与远端三套自动压缩(SUMMARIZATION_PROMPT 摘要,超阈值触发);context/ 目录下数十个结构化上下文片段(environment_context、user_instructions、permissions_instructions、available_skills_instructions 等)按需注入;memories/(read+write 两 crate)+ ext/memories 提供跨会话长期记忆,带 memory_citation 引用。AGENTS.md 作为项目级指令文件。",
+    "provider_abstraction": "model-provider/(provider.rs+auth.rs+bearer_auth_provider.rs+amazon_bedrock)定义 provider 抽象;model-provider-info 描述 provider 元数据;core/src/client.rs 的 ModelClient 持会话级配置,ModelClientSession 持 turn 级状态并缓存 Responses WebSocket(prewarm 机制)。主路径深度绑定 OpenAI Responses API(含 WS v2、previous_response_id 续接、sticky routing token);另有 ollama/lmstudio crate 做本地模型、aws-auth/bedrock 做企业接入。",
+    "execution_sandbox": "三平台原生沙箱(sandboxing crate):macOS 用 seatbelt(/usr/bin/sandbox-exec + .sbpl 策略,deny default 起步,见 seatbelt_base_policy.sbpl/seatbelt_network_policy.sbpl);Linux 用 landlock + bubblewrap + seccomp(linux-sandbox crate,通过 codex-linux-sandbox 自 re-exec 的 helper 进程执行);Windows 用 ACL/AppContainer(windows-sandbox-rs:acl/cap/conpty/deny_read)。PermissionProfile(read_only/workspace_write/danger_full_access)+ WritableRoot 描述可写根;network-proxy crate 提供 MITM 代理做网络白名单。沙箱被拒时按策略可降级重试。",
+    "permission_security": "approval modes:AskForApproval(OnRequest/Never...) × PermissionProfile 组成 ApprovalPreset(utils/approval-presets:read-only/auto/full-access)。审批走协议事件 ExecApprovalRequest/Op::ExecApproval;ExecPolicyAmendment 允许把命令前缀加入 allowlist 免审批;execpolicy crate(含 .policy DSL)做命令策略判定;EscalationPermissions 支持 turn 内临时提权;guardian crate + policy.md 做策略治理;network 审批独立(NetworkApprovalContext)。process-hardening、secrets、keyring-store 加固进程与凭据。",
+    "multi_agent": "一等公民。core/src/agent/(registry/control/role/agent_resolver)+ tools/handlers/multi_agents_v2/(spawn/wait/send_message/interrupt_agent/list_agents/followup_task)实现 orchestrator-subagent 模式;builtins/ 内置 explorer/awaiter 等 agent 角色(.toml 定义);ThreadManager 管理多线程,有 thread_spawn_depth 深度限制防递归爆炸;orchestrator.md 提示词指导主 agent 只协调不亲自做事、并行 spawn。agent-graph-store/agent-identity/external-agent-sessions 支撑跨 agent 协作。",
+    "session_persistence": "rollout crate 是持久化核心:recorder.rs 把每个 session 落盘为 rollout 文件(sessions/ 与 archived_sessions/),compression.rs 压缩,session_index.rs/state_db.rs(SQLite)建索引便于列表/搜索/恢复。thread-store(local/in_memory)管理线程;ThreadManager 提供 resume(从 rollout 重建)与 fork(ForkSnapshot,从历史 response_id 分叉)。response.completed 的 response_id 作为书签存入 Session 用于续接。",
+    "extensibility_plugins": "多层扩展:1) MCP(rmcp-client + mcp-server + codex-mcp,既是 MCP 客户端接外部工具,又把自己暴露为 MCP server);2) 原生扩展 ext/(extension-api 定义 ContextContributor/ThreadLifecycleContributor/PromptSlot 等 trait,内置 goal/guardian/image-generation/memories/skills/web-search);3) 插件市场 core-plugins(manifest.rs + marketplace,可安装/发现工具,request_plugin_install 工具让 agent 自助装插件);4) skills(SKILL.md 式技能,skills crate + core-skills + .codex/skills);5) hooks crate(生命周期钩子 pre/post compact、turn stop 等);6) connectors(外部数据连接器)。",
+    "prompt_engineering": "按模型分版的系统提示词(core/gpt-5.2-codex_prompt.md、gpt-5.1-codex-max_prompt.md、gpt_5_codex_prompt.md 等),含编辑约束/plan 工具/前端美学/最终答案格式等精细规约;personalities/(friendly/pragmatic/none)做语气切换并支持 turn 内覆盖;collaboration-mode-templates(default/pair_programming/plan/execute)做协作模式;prompts crate 集中 SUMMARIZATION_PROMPT/apply_patch/review/agents 等模板;模板用 .md + 占位符注入,prompt_debug.rs 可导出最终 prompt 供调试。",
+    "ui_surface_layers": "单一 Rust 二进制经 arg0 multicall dispatch 按 argv0/子命令分发到多个外壳:codex(交互式 TUI,ratatui)、codex exec(headless 批处理,JSONL/human 双输出)、codex mcp(MCP server 形态)、app-server(JSON-RPC 长驻服务,为桌面 App/IDE/SDK 供能,带 daemon/transport/client)、codex app(桌面)、cloud-tasks(云端任务)。app-server-protocol 用 ts-rs 导出 TS 类型;SDK(sdk/typescript + sdk/python)封装 app-server 协议。npm 包 codex-cli/bin/codex.js 仅是按平台挑选预编译二进制的 shim。"
+  },
+  "capability_coverage": {
+    "code": "强(产品核心)。apply_patch 自定义补丁格式(带 .lark 语法+专用提示词)、unified_exec PTY 交互式执行、turn_diff_tracker 追踪改动、code review 模式、git 安全约束、rg 优先搜索、code-mode(V8 内编排工具)。是同类中编码工程化最完整的。",
+    "writing": "弱~中。无写作专用工具或模板;依赖通用 shell/apply_patch 写文件 + 系统提示中的'前端美学/最终答案格式'通用文风规约。无长文结构化、引用管理、文档大纲等写作 Agent 能力。",
+    "research": "中。内置 web_search 工具(ext/web-search)+ MCP/connectors 可接数据源 + memories 做信息留存 + multi-agent explorer 做并行检索;但无引用聚合、来源核验、研究报告合成等成熟调研流水线(对比 deep-research 类产品)。",
+    "computer_use": "弱~中。强项是终端/PTY computer use(unified_exec 跑任意命令、沙箱内执行);realtime-webrtc 提供语音/实时通道。但没有 GUI 级 computer use(无屏幕截图+鼠标键盘坐标控制/浏览器自动化作为内置工具),需靠外部 MCP(如浏览器 MCP)补足。",
+    "planning": "中~强。update_plan 待办/进度工具 + collaboration-mode 的 Plan Mode(只读探索、产出 decision-complete 的 <proposed_plan>、PlanDelta 流式)+ goal 扩展 + multi-agent 任务分解。是规划机制设计最讲究的开源 Agent 之一,但面向'编码任务规划'而非'日常生活规划'(无日历/提醒/邮件等生活域集成)。"
+  },
+  "cross_platform_approach": "核心策略是\"单一 Rust 库内核 + 协议解耦 + 一个二进制多形态\"。codex-core 是纯库(禁止直接 print,所有输出走抽象),通过 SQ/EQ(Submission/Event 队列)的 in-process 协议与任意 UI 通信;同一可执行文件经 arg0 multicall + clap 子命令分发为 TUI/exec/mcp/app-server/桌面等形态。GUI/IDE/桌面/SDK 统一走 app-server(JSON-RPC 长驻服务),协议类型用 ts-rs/schemars 自动导出给 TS/Python SDK,保证多端类型一致。npm 与 Homebrew 仅分发按平台预编译的二进制(codex-cli/bin/codex.js 做平台选择 shim),回避了 Node/Python 运行时依赖。沙箱按 OS 走三套原生实现(seatbelt/landlock/Windows ACL)但对上层暴露统一的 PermissionProfile。这正契合\"网页优先、兼顾 CLI/桌面/插件\"的目标:把 app-server 当作网页/桌面/插件的统一后端。",
+  "standout_techniques": [
+    {
+      "name": "内核即库 + SQ/EQ 流式协议(UI 完全解耦)",
+      "what": "codex-core 是禁止直接 stdout 的纯库,通过 Submission Queue / Event Queue 与 UI 通信;Op(UserTurn/Interrupt/ExecApproval...)与 EventMsg(AgentMessageContentDelta/ExecApprovalRequest/PlanDelta/TurnComplete...)为 non_exhaustive 可演进枚举,response_id 作书签支持续接/分叉。见 docs/protocol_v1.md、protocol/src/protocol.rs。",
+      "why_borrow": "这是实现'网页优先兼顾多端'的关键模式——把 Agent 引擎做成 UI 无关的库/服务,所有前端只消费同一个事件流。建议直接照搬这套'命令队列入、事件流出'的契约,让网页/CLI/桌面/插件零差异接入。"
+    },
+    {
+      "name": "一二进制 multicall 分发(arg0 dispatch)",
+      "what": "同一个 Rust 可执行文件按 argv0/子命令在启动时分发为 TUI、exec、mcp server、app-server、linux-sandbox helper、apply_patch helper 等,沙箱 helper 还靠自身 re-exec 实现。见 arg0/src/lib.rs、cli/src/main.rs。",
+      "why_borrow": "避免分发多个二进制、简化安装与版本一致性;沙箱/补丁等敏感子能力以同一可信二进制 re-exec 运行,防 PATH 注入。个人 Agent 想覆盖 CLI/桌面/插件多形态时极省运维。"
+    },
+    {
+      "name": "三平台原生沙箱 + 统一 PermissionProfile",
+      "what": "macOS seatbelt(.sbpl,deny-default)、Linux landlock+bubblewrap+seccomp、Windows ACL/AppContainer,三套原生实现对上暴露统一 PermissionProfile(read_only/workspace_write/full_access)+ WritableRoot;网络靠 MITM 代理白名单;沙箱被拒可按策略降级重试。见 sandboxing/、linux-sandbox/、windows-sandbox-rs/。",
+      "why_borrow": "computer use / 执行任意代码的个人 Agent 必须有强隔离。这套'抽象统一、实现分平台、deny-default、网络代理白名单、拒绝即降级'的模型是生产级范本,直接决定能否放心开启自动执行。"
+    },
+    {
+      "name": "approval modes 与可演进 execpolicy",
+      "what": "AskForApproval × PermissionProfile 组成预设(read-only/auto/full-access);execpolicy DSL 判定命令;ExecPolicyAmendment 让用户/agent 把命令前缀加入 allowlist 渐进免审批;EscalationPermissions 支持 turn 内临时提权;网络审批独立建模。见 utils/approval-presets、execpolicy/、protocol/src/approvals.rs。",
+      "why_borrow": "在'安全'与'不打断心流'间取平衡的成熟设计。'一次批准、前缀记忆、可临时提权'的渐进信任模型很适合日常长期使用的个人 Agent。"
+    },
+    {
+      "name": "code-mode:在 V8 isolate 内用 JS 编排工具",
+      "what": "提供 exec/wait 两个元工具,模型写 JavaScript 在全新 V8 isolate 中以 async module 运行,所有工具暴露为 global tools 对象(await tools.xxx(...)),支持 store/load 跨调用状态、yield_control 流式回吐、ALL_TOOLS 动态发现;无 Node/FS/网络。见 code-mode/、core/src/tools/code_mode/、v8-poc。",
+      "why_borrow": "把'多步工具编排'从多轮 function-call 压缩成一段可组合代码,显著省 token、降延迟,并天然支持循环/条件/并行。对调研、批量自动化、computer use 等多步任务是强力武器。"
+    },
+    {
+      "name": "工具可见性分级 + 延迟发现(Deferred + tool_search)",
+      "what": "ToolExposure 四态(Direct/Deferred/DirectModelOnly/Hidden):大量工具默认不进初始工具表,标记 Deferred 并附 search_info,模型经 tool_search 按需检索后再启用。见 tools/src/tool_executor.rs、core/src/tools/tool_search.rs。",
+      "why_borrow": "工具数量爆炸(MCP+插件+技能)时控制上下文与首轮 token 的关键。覆盖'写代码/写作/调研/computer use/规划'必然工具众多,这套按需暴露机制几乎是必需。"
+    },
+    {
+      "name": "远端+本地双轨自动压缩与结构化上下文注入",
+      "what": "compact.rs/compact_remote_v2.rs 三套压缩策略(本地摘要 + 远端压缩),turn 前 run_pre_sampling_compact 预压缩;context/ 数十个结构化片段(环境/权限/技能/人格)按需注入而非堆字符串。见 core/src/compact.rs、core/src/context/。",
+      "why_borrow": "长会话个人 Agent 必须解决上下文膨胀。'结构化片段按需注入 + 多策略自动压缩 + 引用式记忆'比手工拼 prompt 可维护得多。"
+    },
+    {
+      "name": "orchestrator-subagent 多智能体 + 深度限制",
+      "what": "主 agent 经 multi_agents_v2(spawn/wait/send_message/interrupt)派生子 agent 并行干活,自己只协调;builtins explorer/awaiter 等角色用 .toml 定义;thread_spawn_depth 限制防递归爆炸。见 core/src/agent/、core/src/tools/handlers/multi_agents_v2/。",
+      "why_borrow": "调研/大型编码任务需要 fan-out 并行。'主协调-子执行 + 角色模板 + 深度防护'是可直接复用的编排骨架。"
+    }
+  ],
+  "weaknesses_avoid": [
+    "深度绑定 OpenAI Responses API:client.rs 大量 ApiResponsesRequest/WebSocket v2/previous_response_id/sticky-routing 逻辑与 OpenAI 私有语义耦合,虽有 provider 抽象但主路径并非真正多 provider 中立。若要做多模型(Anthropic/Gemini/本地)个人 Agent,需在 ModelClient 层重新抽象,别照搬其 Responses 专属实现。",
+    "写作/调研/生活规划/GUI computer use 覆盖薄:几乎一切围绕编码。无写作工具/文档结构、无引用核验式调研流水线、无 GUI 屏幕/浏览器 computer use 内置工具、无日历/邮件/提醒等生活域集成。把它当'编码 Agent 内核'而非'全能个人助理',这四类能力需自建。",
+    "工程体量极重:约120个 crate + Bazel/Cargo 双构建 + Nix flake + 大量 OpenAI 内部特性(cloud-tasks/attestation/analytics/otel/backend-client)。完整克隆会引入大量与个人 Agent 无关的企业基建,学架构可,直接 fork 全量则负担过大,应择优裁剪。",
+    "Rust 内核学习/迭代曲线陡:类型与 trait 抽象层数多(ToolExecutor/Contributor/Router/Registry 等),改动成本高、上手慢。网页优先且需快速迭代时,可借鉴其分层理念,但内核未必要用 Rust——可只复刻'内核即库 + 事件流协议 + 沙箱'三原则。",
+    "部分能力依赖 OpenAI 后端服务而非本地:远端 compact、cloud-tasks、backend-client、attestation 等假定有 OpenAI 服务端配合,自托管时这些路径不可用或需替换,文档(docs/sandbox.md 等)也常只给外链而非完整说明。"
+  ],
+  "key_files": [
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/session/turn.rs",
+      "role": "内层 turn 采样循环 run_turn:发模型请求、消费 SSE、执行工具回喂、压缩与注入,Agent 主循环核心"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/tasks/regular.rs",
+      "role": "外层 task 循环 RegularTask::run:turn 续跑、TurnStarted、prewarm 消费"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/docs/protocol_v1.md",
+      "role": "SQ/EQ 流式协议规范:Codex/Session/Task/Turn 概念、Op/EventMsg 契约"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/protocol/src/protocol.rs",
+      "role": "协议类型权威定义(Op/EventMsg/SandboxPolicy 等),被各端与 SDK 共享"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/tools/router.rs",
+      "role": "ToolRouter:工具注册、路由、并行能力、model-visible specs 构建"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/tools/src/tool_executor.rs",
+      "role": "ToolExecutor trait 与 ToolExposure 四态(工具系统统一契约与可见性分级)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/code-mode/src/description.rs",
+      "role": "code-mode:V8 内 JS 编排工具的 exec/wait 元工具描述与 TS 类型生成"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/sandboxing/src/seatbelt.rs",
+      "role": "macOS seatbelt 沙箱:sandbox-exec 命令构建、.sbpl 策略、网络代理白名单"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/sandboxing/src/seatbelt_base_policy.sbpl",
+      "role": "deny-default 的 macOS 沙箱基础策略(借鉴 Chrome sandbox)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/sandboxing/src/landlock.rs",
+      "role": "Linux 沙箱:PermissionProfile -> codex-linux-sandbox helper 的 CLI 参数构建"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/linux-sandbox/src/",
+      "role": "Linux landlock+bubblewrap+seccomp helper 实现(self re-exec)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/windows-sandbox-rs/src/",
+      "role": "Windows ACL/AppContainer/ConPTY 沙箱实现(跨平台第三套)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/utils/approval-presets/src/lib.rs",
+      "role": "approval modes 预设(read-only/auto/full-access)= AskForApproval × PermissionProfile"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/protocol/src/approvals.rs",
+      "role": "审批与提权类型:ExecPolicyAmendment、EscalationPermissions、网络审批上下文"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/client.rs",
+      "role": "ModelClient/ModelClientSession:provider 通信、Responses WS prewarm、turn 级状态"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/model-provider/src/provider.rs",
+      "role": "provider 抽象(auth/bearer/bedrock),模型后端可插拔层"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/compact.rs",
+      "role": "自动上下文压缩(本地摘要 + 触发逻辑),长会话上下文管理"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/context/mod.rs",
+      "role": "结构化上下文片段按需注入(环境/权限/技能/人格 等数十个)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/rollout/src/recorder.rs",
+      "role": "会话持久化:rollout 文件落盘、压缩、SQLite 索引,支撑 resume/fork/list"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/thread_manager.rs",
+      "role": "ThreadManager:线程生命周期、resume 重建、ForkSnapshot 历史分叉、多 agent 线程"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/agent/",
+      "role": "多智能体编排(registry/control/role/resolver + builtins explorer/awaiter)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/tools/handlers/multi_agents_v2/",
+      "role": "子 agent 工具:spawn/wait/send_message/interrupt/list(orchestrator-subagent)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/arg0/src/lib.rs",
+      "role": "一二进制 multicall 分发:按 argv0/子命令分发为 TUI/exec/mcp/sandbox helper"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/cli/src/main.rs",
+      "role": "CLI 主入口:clap 子命令路由到 tui/exec/mcp/app-server/login/doctor 等"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/app-server/src/lib.rs",
+      "role": "app-server:JSON-RPC 长驻服务,为桌面/IDE/网页/SDK 提供统一后端"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/app-server-protocol/src/",
+      "role": "app-server 协议 + ts-rs 类型导出(多端/SDK 类型一致性来源)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/rmcp-client/src/lib.rs",
+      "role": "MCP 客户端(stdio/http/oauth/elicitation),接外部工具生态"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/ext/extension-api/src/lib.rs",
+      "role": "原生扩展点 trait(ContextContributor/ThreadLifecycleContributor/PromptSlot 等)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core-plugins/src/manager.rs",
+      "role": "插件市场:manifest/安装/发现(agent 可自助 request_plugin_install)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/gpt-5.2-codex_prompt.md",
+      "role": "分版系统提示词(编辑约束/plan/前端美学/最终答案格式)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/collaboration-mode-templates/templates/plan.md",
+      "role": "Plan Mode 提示词:只读探索 + 产出 decision-complete 计划(规划能力核心)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/tools/handlers/apply_patch.lark",
+      "role": "apply_patch 自定义补丁格式语法(编码编辑原语)"
+    },
+    {
+      "path": "/Users/fsm/project/arclightagent/codex/codex-rs/core/src/unified_exec/mod.rs",
+      "role": "unified_exec:沙箱内 PTY 交互式执行(终端 computer use 核心)"
+    }
+  ]
+}

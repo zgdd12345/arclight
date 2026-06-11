@@ -1,0 +1,208 @@
+{
+  "topic": "网页优先的 AI Agent 应用架构 SOTA(2025-2026):流式服务端运行时、多租户会话与持久化、Vercel AI SDK、AG-UI 协议、assistant-ui、CopilotKit、SSE/WebSocket 流、resumable/断线恢复,以及可被 web/桌面/插件共享的 agent 内核",
+  "summary": "Hi Alba。2025-2026 年「网页优先」的 agent 应用架构已经收敛出一套相对清晰的分层范式,核心是把「agent 内核(reasoning loop + tools + memory)」与「前端交互层」解耦,中间用标准化的事件流协议连接。\n\n要点综述:\n\n1) 传输与流式协议:行业事实标准是 SSE(Server-Sent Events)+ JSON/NDJSON 事件流,而非 WebSocket。原因是 SSE 是纯 HTTP、无需 sticky session、易于横向扩展、浏览器 EventSource 自带 Last-Event-ID 重连;单向 token 流恰好匹配 LLM 输出模式。OpenAI、Anthropic、Vercel AI SDK 全部以 SSE 为默认数据通道。WebSocket 仅在需要双向控制(打断、协作、语音 Realtime、强 backpressure)时引入,典型做法是「WebSocket 控制 + SSE 数据」双通道。关键坑:SSE 没有应用层 backpressure;长流在 LLM 思考间隙会被代理/LB 在 60-120s 空闲超时切断,必须每 15-30s 发心跳注释行。\n\n2) 断线恢复 / Resumable Streams 是 2025 年最重要的进展。纯 SSE 的 EventSource 自动重连,但服务端生成状态通常已丢失——刷新页面或断网就要从头重算、重复付费。SOTA 做法:服务端用「发布/订阅 + 持久化偏移量」把生成与消费解耦,客户端按 token offset 精确续传。代表实现:vercel/resumable-stream(配 Redis)+ AI SDK useChat 的 resume 选项;Upstash Realtime;Durable Streams(@durable-streams/aisdk-transport,跨标签页/设备/用户共享);Cloudflare AIChatAgent(v0.2.24+ 原生 resumable streaming,基于 Durable Objects)。\n\n3) 多租户会话与持久化:主流是「每会话一个状态对象 + checkpointer/外部存储」。LangGraph 1.0(2025-10)用 checkpointer 把整个 graph state 落库,支持暂停/恢复/time-travel;Mastra(v1.0,2026-01)用 storage 持久化 workflow 执行态,可无限挂起再恢复;Cloudflare Agents 把每个 agent 实例做成一个自带 SQLite 的 Durable Object,状态自动跨请求/休眠持久化;AWS Bedrock AgentCore(GA 2025-10)提供会话隔离的 serverless Runtime + 托管 Memory。\n\n4) 前端交互层三大方案:(a) assistant-ui——Radix 风格可组合 primitives,核心是 LocalRuntime / ExternalStoreRuntime 两种运行时 + 框架适配器(AI SDK、LangGraph、DataStream、AssistantTransport),最流行的 AI chat UI 库;(b) CopilotKit——三层架构(React 前端 + 自托管/云端 Copilot Runtime + Python SDK),提供 CoAgents、共享状态、HITL、Generative UI,是 AG-UI 协议的制定方;(c) Vercel AI SDK UI(useChat/useUIMessageStream)——最轻量、与 v5 后端一体。\n\n5) 协议标准化:AG-UI(Agent-User Interaction Protocol)是 2025 年新晋事实标准,定义约 16 种标准事件(messages / tool calls / state patches / lifecycle),走 SSE/WebSocket/webhook,已被 LangGraph、CrewAI、Mastra、Pydantic AI、Microsoft Agent Framework、Google ADK、AWS Strands、LlamaIndex、Claude Agent SDK 等接入(约 14k stars)。它与 MCP(工具/数据接入)、A2A(agent 间通信)互补,共同构成「agent 三件套协议」。\n\n6) 「共享 agent 内核」模式:把 reasoning loop 做成 headless 服务,前端只消费事件流。这天然支持 web/桌面/插件多端共享同一后端——AG-UI 事件流是这个解耦的关键契约。OpenAI Agents SDK(Python/JS,sessions + handoffs + 可接 Temporal/Dapr/Restate 做 durable execution)、Mastra(Hono standalone server)、Cloudflare Agents、Bedrock AgentCore 都是「内核即服务」的代表载体。",
+  "sota_techniques": [
+    {
+      "name": "Vercel AI SDK v5 (streamText + Agent + useChat)",
+      "description": "TypeScript 全栈 agent/聊天框架,2025-07-31 发布 v5。默认 SSE 流式;新增轻量 Agent 类(包装 streamText/generateText)与 agentic loop 控制(stopWhen / prepareStep 控制/中止多步 tool 调用);UIMessage 流协议、tool UI、结构化输出。前端 useChat/useUIMessageStream 与后端一体,是网页优先 agent 的默认起点。",
+      "projects": "vercel/ai (github.com/vercel/ai)",
+      "maturity": "成熟稳定,生产级,生态最大",
+      "url": "https://ai-sdk.dev/"
+    },
+    {
+      "name": "Resumable / Durable Streams(断线恢复流)",
+      "description": "解决 SSE 刷新/断网即丢失生成状态的核心痛点:服务端用 pub/sub + 持久化 offset 把「生成」与「消费」解耦,客户端按 token offset 精确续传,可跨标签页/设备/用户共享同一条流。AI SDK useChat 的 resume 选项 + GET /api/chat/[id]/stream 端点是标准接线方式。",
+      "projects": "vercel/resumable-stream(+Redis)、Durable Streams(@durable-streams/aisdk-transport)、Upstash Realtime",
+      "maturity": "新兴但快速成为标配(2025 下半年)",
+      "url": "https://github.com/vercel/resumable-stream"
+    },
+    {
+      "name": "AG-UI Protocol(Agent-User Interaction Protocol)",
+      "description": "开放、轻量、事件驱动协议,标准化 agent 后端与前端 app 的双向连接。定义约 16 种标准事件(message / tool call / state patch / lifecycle);传输支持 SSE / WebSocket / webhook;提供 TS/Python/Kotlin/Go/Rust 等多语言 SDK。与 MCP(工具接入)、A2A(agent 间)互补,是「内核可被多端共享」的关键契约。",
+      "projects": "ag-ui-protocol/ag-ui(约 14k stars),由 CopilotKit 主导;LangGraph/CrewAI/Mastra/Pydantic AI/MS Agent Framework/Google ADK/AWS Strands/LlamaIndex 已接入",
+      "maturity": "新兴事实标准,采用快速增长",
+      "url": "https://github.com/ag-ui-protocol/ag-ui"
+    },
+    {
+      "name": "assistant-ui",
+      "description": "最流行的 React AI chat UI 库(Radix 风格可组合 primitives,自带流式/自动滚动/重试/附件/markdown/代码高亮/语音/无障碍)。核心是 LocalRuntime(runtime 持有状态,简单 fetch)与 ExternalStoreRuntime(状态放 redux/zustand/tanstack-query),加框架适配器(AI SDK、LangGraph、DataStream、AssistantTransport 可流式全量 agent 状态快照)。thread 持久化支持单 thread / cloud / 自建 DB。",
+      "projects": "assistant-ui/assistant-ui(@assistant-ui/react),50k+/月下载,Thoughtworks 雷达收录",
+      "maturity": "成熟,生产级,社区最广",
+      "url": "https://www.assistant-ui.com/"
+    },
+    {
+      "name": "CopilotKit + CoAgents",
+      "description": "面向 agent 的前端栈,三层架构:@copilotkit/react-core + react-ui(前端)、@copilotkit/runtime(可自托管或用 Copilot Cloud 的服务端中间层)、Python SDK(桥接 Python agent 生态)。提供 CoAgents、共享状态、Human-in-the-Loop、Generative UI(运行时动态渲染/更新 UI 组件)、MCP Apps、Slack 部署。AG-UI 协议的制定与参考实现方。",
+      "projects": "CopilotKit/CopilotKit;周安装约 120k,周交互 200 万+",
+      "maturity": "成熟,生产级",
+      "url": "https://docs.copilotkit.ai/"
+    },
+    {
+      "name": "LangGraph 1.0 + Checkpointer 持久化",
+      "description": "图结构多 agent 编排框架,1.0 于 2025-10 发布。memory 即 graph state,用 checkpointer 把整个状态落到外部存储,支持暂停/恢复(可换计算环境)、time-travel 调试(回滚/重放)、条件分支、循环、HITL。多租户会话持久化的参考实现。",
+      "projects": "langchain-ai/langgraph;LangGraph Platform 提供托管运行时",
+      "maturity": "成熟,生产级(1.0)",
+      "url": "https://www.langchain.com/langgraph"
+    },
+    {
+      "name": "Mastra(TypeScript Agent 框架)",
+      "description": "Gatsby 团队出品的 TS agent 框架,v1.0 于 2026-01 发布(YC W25)。提供 agents、graph-based workflows(.then/.branch/.parallel + 可无限挂起/恢复的 HITL)、memory(工作/语义记忆)、observability、统一 model router(94+ 提供商 3300+ 模型)。可作为 Hono standalone server 部署,或内嵌 Next.js / Express / Fastify;内置 Vercel/Netlify/Cloudflare deployer。适合纯 TS 全栈「内核即服务」。",
+      "projects": "mastra-ai/mastra",
+      "maturity": "成熟(v1.0),生产级",
+      "url": "https://mastra.ai/"
+    },
+    {
+      "name": "Cloudflare Agents(Durable Objects 内核)",
+      "description": "每个 agent 实例 = 一个自带 SQLite 的 Durable Object,状态跨请求/休眠自动持久化。AIChatAgent 自 v0.2.24(2025-11)原生支持 resumable streaming(跨刷新/断网/多标签多设备同步)。新增 keepAlive() 心跳(分钟级长任务)与 Project Think 的 durable execution 原语(fibers/runFiber/stash/onFiberRecovered)。边缘部署、强一致状态、长会话的代表方案。",
+      "projects": "cloudflare/agents",
+      "maturity": "成熟并快速演进",
+      "url": "https://developers.cloudflare.com/agents/"
+    },
+    {
+      "name": "Amazon Bedrock AgentCore",
+      "description": "模块化、serverless 的生产级 agent 套件,GA 于 2025-10-13。Runtime(低延迟、会话隔离、支持任意框架与长任务/多模态)、Memory(会话与长期记忆)、Gateway(API/Lambda → agent 工具)、Browser(托管 headless 浏览)、Observability(基于 OpenTelemetry → CloudWatch)。框架无关的托管「内核即服务」基础设施。",
+      "projects": "AWS Bedrock AgentCore",
+      "maturity": "GA,企业级",
+      "url": "https://aws.amazon.com/bedrock/agentcore/"
+    },
+    {
+      "name": "OpenAI Agents SDK(sessions / handoffs / durable execution)",
+      "description": "轻量 agent 框架(Python/JS),提供 Sessions(自动会话历史/工作记忆)、Handoffs(以 tool 形式委派给专长 agent)、统一流式事件。2026 线(0.2.x)加入 Realtime API 语音、一等 MCP server、Sentry tracing;可接 Temporal/Dapr/Restate 做 durable 长任务与 HITL,典型部署在 FastAPI 后。适合做共享 agent 内核服务。",
+      "projects": "openai/openai-agents-python(及 JS 版)",
+      "maturity": "成熟,生产级",
+      "url": "https://openai.github.io/openai-agents-python/"
+    },
+    {
+      "name": "SSE + 心跳 + 双通道(SSE 数据 / WebSocket 控制)模式",
+      "description": "网页优先流式的工程范式:数据走 SSE(纯 HTTP、无 sticky session、易横扩、EventSource 自动重连),需要打断/协作/语音/强 backpressure 时再叠加 WebSocket 控制通道。SSE 无应用层 backpressure,需用 token budget 限流;长流必须每 15-30s 发 comment 心跳,避免代理/LB 60-120s 空闲超时。",
+      "projects": "Anthropic/OpenAI/Vercel 均采用;NDJSON/SSE 事件流为通用载体",
+      "maturity": "成熟的事实标准模式",
+      "url": "https://websocket.org/guides/use-cases/ai-streaming/"
+    }
+  ],
+  "recommendations_for_user": [
+    "分层架构定调:把『agent 内核(reasoning loop + tools + memory + 持久化)』做成 headless 服务,前端(web/桌面/插件)只消费标准事件流。中间契约优先选 AG-UI(或至少自定义一套等价的 message/tool-call/state-patch/lifecycle 事件),这是日后多端共享的关键解耦点。",
+    "技术栈建议(纯 TS、网页优先、个人项目)首选:后端 Vercel AI SDK v5(streamText + Agent + stopWhen)或 Mastra(若要更完整的 workflow/memory/部署器);前端 assistant-ui(可组合、生态最广)或直接 useChat。这条线一致 TS、文档全、上手最快。",
+    "把『断线恢复』从第一天就设计进去,别等踩坑再补。最小实现:Redis + vercel/resumable-stream + useChat 的 resume 选项 + GET /api/chat/[id]/stream;或直接用 Durable Streams / Upstash Realtime。这能让刷新页面、切设备、移动端断网都不丢生成、不重复付费。",
+    "会话与多租户持久化:每个会话用独立状态对象 + checkpointer 落库。轻量自建可用 Postgres/SQLite + 一张 activeStreamId 表;想省事直接用 LangGraph checkpointer、Mastra storage,或 Cloudflare Durable Objects(每会话自带 SQLite,边缘强一致,长会话/恢复几乎零配置——很适合个人全平台 agent)。",
+    "传输默认用 SSE,不要一上来就上 WebSocket。务必加心跳行(每 15-30s)防代理空闲超时;给客户端做 token budget 限流补偿 SSE 无 backpressure 的缺陷。只有当你确实需要服务端→客户端的实时打断、语音 Realtime、或多人协作时,再引入 WebSocket 控制通道。",
+    "工具与外部接入用 MCP,agent 间协作(如果有)用 A2A,前后端交互用 AG-UI——这三者互补、不要混用。MCP 让你的 tools 在 web/桌面/插件多端复用同一套定义。",
+    "桌面端(Electron/Tauri)与浏览器插件直接复用同一个 agent 内核服务,只换前端外壳:Tauri + 同一 SSE/AG-UI 端点最省体积;插件侧注意浏览器对长连接与 CORS 的限制,SSE 通常比 WebSocket 在 MV3 service worker 下更稳。",
+    "可观测性从一开始接 OpenTelemetry(参考 Bedrock AgentCore / OpenAI SDK 的 Sentry tracing 模式),个人项目也建议至少记录每步 reasoning/tool-call/token 用量,便于排查与控成本。",
+    "若想最小化自运维:云端托管方案可考虑 Copilot Cloud、LangGraph Platform、Bedrock AgentCore、Cloudflare Agents——把持久化/扩缩/恢复交给平台,自己专注内核逻辑与前端体验。"
+  ],
+  "caveats": [
+    "SSE 没有应用层 backpressure:长任务或慢速移动端会把未渲染 token 堆在内存里,必须自己做 per-session token budget 限流,否则可能 OOM 或体验崩坏。",
+    "代理/负载均衡器空闲超时:长流在 LLM 思考间隙数十秒无字节,中间设施常在 60-120s 静默后掐断连接;务必每 15-30s 发 SSE comment 心跳。",
+    "EventSource 自动重连 ≠ 状态恢复:浏览器会用 Last-Event-ID 重连,但服务端生成状态默认已丢,断线即从头重算并重复付费。必须显式实现 resumable streams(pub/sub + 持久化 offset),这是最容易被忽略的坑。",
+    "AG-UI 仍属新兴协议(2025 才成形),事件格式、各框架适配成熟度参差不齐,部分集成(OpenAI Agent SDK、Bedrock Agents、.NET 等)仍标注 in-progress;深度依赖前请验证你的框架适配是否生产可用。",
+    "别把 MCP / A2A / AG-UI 角色搞混:MCP 是工具/数据接入,A2A 是 agent 间通信,AG-UI 是 agent↔前端。用错层会导致架构混乱。",
+    "resumable-stream / Durable Streams 引入 Redis 或专用存储依赖,增加运维面与一致性考量(谁是 active stream、何时清理 activeStreamId);onFinish 必须可靠清理,否则会出现『幽灵活跃流』。",
+    "Cloudflare Durable Objects 的 keepAlive()/Project Think fibers 等长会话原语较新(2026 Q1-Q2)、部分仍是实验特性,生产前需评估稳定性与厂商锁定。",
+    "框架/平台版本演进快(LangGraph 1.0、Mastra 1.0、AI SDK v5、Cloudflare Agents 0.2.x 均在近 12 个月内大改),升级时留意 breaking changes;本报告部分『未来日期』信息(2026 年发布)请以官方 changelog 复核为准。",
+    "多租户下的会话隔离与数据边界(尤其用单一 Redis/DB)要做好租户键隔离与鉴权,避免跨会话/跨用户串流;个人项目早期也建议预留这层抽象。",
+    "桌面/插件端复用同一内核时注意鉴权与密钥管理:不要把模型 API key 放到客户端,统一经由你的 agent 内核服务代理。"
+  ],
+  "sources": [
+    {
+      "title": "AI SDK (Vercel) 官方站",
+      "url": "https://ai-sdk.dev/"
+    },
+    {
+      "title": "AI SDK UI: Chatbot Resume Streams(官方文档)",
+      "url": "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-resume-streams"
+    },
+    {
+      "title": "vercel/resumable-stream(GitHub)",
+      "url": "https://github.com/vercel/resumable-stream"
+    },
+    {
+      "title": "Resumable AI SDK v5 Streams with Upstash Realtime(Upstash Blog)",
+      "url": "https://upstash.com/blog/realtime-ai-sdk"
+    },
+    {
+      "title": "Durable Streams for Vercel AI SDK",
+      "url": "https://durablestreams.com/vercel-ai-sdk"
+    },
+    {
+      "title": "is there any way to resume streams?(vercel/ai Discussion #5126)",
+      "url": "https://github.com/vercel/ai/discussions/5126"
+    },
+    {
+      "title": "AG-UI Protocol(GitHub ag-ui-protocol/ag-ui)",
+      "url": "https://github.com/ag-ui-protocol/ag-ui"
+    },
+    {
+      "title": "AG-UI Protocol(CopilotKit)",
+      "url": "https://www.copilotkit.ai/ag-ui"
+    },
+    {
+      "title": "Introducing AG-UI: The Protocol Where Agents Meet Users(CopilotKit Blog)",
+      "url": "https://www.copilotkit.ai/blog/introducing-ag-ui-the-protocol-where-agents-meet-users"
+    },
+    {
+      "title": "AG-UI Integration with Agent Framework(Microsoft Learn)",
+      "url": "https://learn.microsoft.com/en-us/agent-framework/integrations/ag-ui/"
+    },
+    {
+      "title": "assistant-ui 官方站",
+      "url": "https://www.assistant-ui.com/"
+    },
+    {
+      "title": "assistant-ui Pick a Runtime(官方文档)",
+      "url": "https://www.assistant-ui.com/docs/runtimes/pick-a-runtime"
+    },
+    {
+      "title": "assistant-ui/assistant-ui(GitHub)",
+      "url": "https://github.com/assistant-ui/assistant-ui"
+    },
+    {
+      "title": "CopilotKit 官方文档",
+      "url": "https://docs.copilotkit.ai/"
+    },
+    {
+      "title": "CopilotKit Self Hosting (Copilot Runtime)",
+      "url": "https://docs.copilotkit.ai/concepts/self-hosting"
+    },
+    {
+      "title": "CopilotKit/CopilotKit(GitHub)",
+      "url": "https://github.com/copilotkit/copilotkit"
+    },
+    {
+      "title": "Streaming for LLM Apps: SSE vs WebSockets(Hivenet)",
+      "url": "https://www.hivenet.com/post/llm-streaming-sse-websockets"
+    },
+    {
+      "title": "AI Token Streaming: From SSE to Durable Sessions(WebSocket.org)",
+      "url": "https://websocket.org/guides/use-cases/ai-streaming/"
+    },
+    {
+      "title": "LangGraph(LangChain 官方)",
+      "url": "https://www.langchain.com/langgraph"
+    },
+    {
+      "title": "Mastra 官方站",
+      "url": "https://mastra.ai/"
+    },
+    {
+      "title": "mastra-ai/mastra(GitHub)",
+      "url": "https://github.com/mastra-ai/mastra"
+    },
+    {
+      "title": "Cloudflare Agents 文档",
+      "url": "https://developers.cloudflare.com/agents/"
+    },
+    {
+      "title": "Cloudflare Agents SDK v0.2.24 resumable streaming(Changelog)",
+      "url": "https://developers.cloudflare.com/changelog/post/2025-11-26-agents-resumable-streaming/"
+    },
+    {
+      "title": "Amazon Bedrock AgentCore(AWS)",
+      "url": "https://aws.amazon.com/bedrock/agentcore/"
+    },
+    {
+      "title": "OpenAI Agents SDK(官方文档)",
+      "url": "https://openai.github.io/openai-agents-python/"
+    }
+  ]
+}
