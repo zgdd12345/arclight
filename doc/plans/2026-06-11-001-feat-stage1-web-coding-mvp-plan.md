@@ -207,7 +207,7 @@ turn 状态机：`queued → running → [awaiting_approval ⇄ running] → com
 
 ### Phase M1 — 写代码闭环
 
-- [x] **Unit 3: 写代码最小核 ★（slice2）** ✅ 2026-06-11（test-first：12 不变量先行全过；case-01 mock-provider 模式全链 PASS，**真实 LLM 验收待有效 ANTHROPIC_API_KEY**；跨 turn 会话历史物化随 U5/U6；审批 slice2 为 allow-all 接缝，U4 换 fail-closed 状态机）
+- [x] **Unit 3: 写代码最小核 ★（slice2）** ✅ 2026-06-11（test-first：12 不变量先行全过；case-01 mock 模式与**真实模式均 PASS**——真实后端为智谱 GLM glm-4.6 经 Anthropic 兼容端点（D4 补充记账，成本考量），4.1s 完成；跨 turn 会话历史物化随 U5/U6；审批 slice2 为 allow-all 接缝，U4 换 fail-closed 状态机）
 
 **Goal:** queryLoop 主循环 + 4 内置工具 + nono 执行真实跑通："加一个函数"端到端，golden case-01 过线。
 

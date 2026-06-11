@@ -20,3 +20,8 @@ SSE 续接由自研 EventStreamManager（fetch + ReadableStream）实现。
 - opencode (MIT) — compaction 摘要模板、apply-patch 解析器（slice5/2 落地时补清单）
 
 实际复制/移植代码落地时，须在本文件补充：来源文件路径、目标文件路径、修改说明。
+
+D4 补充（2026-06-11）：阶段一 provider 协议维持 Anthropic Messages 单协议，
+实际后端采用智谱 GLM 的 Anthropic 兼容端点（open.bigmodel.cn/api/anthropic，模型 glm-4.6），
+成本考量（Anthropic 官方 API 价格较高）。provider-adapter 不变，仅 baseUrl/model 配置化。
+golden eval 真实模式以 GLM 为基准跑。

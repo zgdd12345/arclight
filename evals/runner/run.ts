@@ -34,6 +34,21 @@ type EvalCase = {
 };
 
 const ROOT = join(import.meta.dir, "..");
+
+/** 与 config/load.ts 同步的 key 解析：ANTHROPIC 官方优先，否则智谱 Anthropic 兼容端点（D4 补充） */
+function realProviderProfile() {
+  const zhipu = !process.env.ANTHROPIC_API_KEY && !!process.env.ZHIPU_API_KEY;
+  return {
+    apiKey: process.env.ANTHROPIC_API_KEY ?? process.env.ZHIPU_API_KEY ?? "",
+    model: process.env.ARCLIGHT_MODEL ?? (zhipu ? "glm-4.6" : "claude-sonnet-4-5"),
+    systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
+    ...(process.env.ANTHROPIC_BASE_URL
+      ? { baseUrl: process.env.ANTHROPIC_BASE_URL }
+      : zhipu
+        ? { baseUrl: "https://open.bigmodel.cn/api/anthropic/v1" }
+        : {}),
+  };
+}
 const TOKEN = "eval-harness-token-0123456789abcdef0123456789abcdef";
 
 function runJudges(
@@ -116,13 +131,7 @@ async function runCase(c: EvalCase, mock: boolean): Promise<boolean> {
     .register(writeFileTool as never)
     .register(applyPatchTool as never)
     .register(bashTool as never);
-  const callProvider = mock
-    ? mockProviderFor(c.id)
-    : makeCallProvider({
-        apiKey: process.env.ANTHROPIC_API_KEY ?? "",
-        model: process.env.ARCLIGHT_MODEL ?? "claude-sonnet-4-5",
-        systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
-      });
+  const callProvider = mock ? mockProviderFor(c.id) : makeCallProvider(realProviderProfile());
   const runner = new AgentRunner({
     db,
     bus,
@@ -189,9 +198,9 @@ async function runCase(c: EvalCase, mock: boolean): Promise<boolean> {
 
 // ── 入口 ──
 const mock = process.env.ARCLIGHT_EVAL_MOCK === "1";
-if (!mock && !process.env.ANTHROPIC_API_KEY) {
+if (!mock && !process.env.ANTHROPIC_API_KEY && !process.env.ZHIPU_API_KEY) {
   console.error(
-    "SKIPPED: ANTHROPIC_API_KEY 缺失。真实 golden eval 需有效 key；机制验证用 ARCLIGHT_EVAL_MOCK=1。",
+    "SKIPPED: 无可用 key（ANTHROPIC_API_KEY / ZHIPU_API_KEY）。机制验证用 ARCLIGHT_EVAL_MOCK=1。",
   );
   process.exit(2);
 }

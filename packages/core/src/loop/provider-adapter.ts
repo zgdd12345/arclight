@@ -15,13 +15,17 @@ import type {
 
 export type ProviderProfile = {
   apiKey: string;
-  model: string; // 阶段一单 provider：Anthropic（D4 收窄记账）
+  model: string; // 阶段一单 provider 协议：Anthropic Messages（D4）
   systemPrompt: string;
+  baseUrl?: string; // 协议兼容端点（如智谱 bigmodel，D4 补充记账）；缺省 Anthropic 官方
   maxOutputTokens?: number;
 };
 
 export function makeCallProvider(profile: ProviderProfile): CallProvider {
-  const anthropic = createAnthropic({ apiKey: profile.apiKey });
+  const anthropic = createAnthropic({
+    apiKey: profile.apiKey,
+    ...(profile.baseUrl !== undefined ? { baseURL: profile.baseUrl } : {}),
+  });
 
   return async function* callProvider(
     messages,

@@ -59,6 +59,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
       apiKey: config.anthropicApiKey,
       model: config.model,
       systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
+      ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
     }),
     executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
     approvals: { check: async () => ({ decision: "allow" }) }, // U4 换 fail-closed 状态机

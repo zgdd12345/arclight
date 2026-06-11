@@ -6,11 +6,18 @@ import { z } from "zod";
 // 配置优先级（DEV_PLAN §1.3）：process.env > .arclight/config.json（repo 级）
 // > ~/.config/arclightagent/config.json（用户级）> 内置默认。
 // 纪律：ANTHROPIC_API_KEY 及任何 OAuth token 绝不写入 server.json。
+// 阶段一单 provider 协议 = Anthropic Messages（D4）；后端可为 Anthropic 官方或任何协议兼容端点。
+// D4 补充记账（2026-06-11）：实际部署用智谱 GLM 的 Anthropic 兼容端点（成本考量），
+// 检测到 ZHIPU_API_KEY 时自动取 bigmodel 端点 + glm 默认模型。
+export const ZHIPU_ANTHROPIC_BASE_URL = "https://open.bigmodel.cn/api/anthropic/v1";
+export const ZHIPU_DEFAULT_MODEL = "glm-4.6";
+
 export const ConfigSchema = z.object({
-  anthropicApiKey: z.string().min(1),
+  anthropicApiKey: z.string().min(1), // Anthropic 协议端点的 key（官方或智谱）
+  baseUrl: z.string().url().optional(), // 缺省 = Anthropic 官方
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(43127),
-  model: z.string().default("claude-sonnet-4-5"), // 阶段一单 provider（D4），按选型清单 claude-sonnet-4-x
+  model: z.string().default("claude-sonnet-4-5"),
 });
 export type ArclightConfig = z.infer<typeof ConfigSchema>;
 
@@ -27,7 +34,15 @@ export function loadConfig(repoPath: string): ArclightConfig {
   const userFile = readJsonIfExists(join(homedir(), ".config", "arclightagent", "config.json"));
   const repoFile = readJsonIfExists(join(repoPath, ".arclight", "config.json"));
   const env: Record<string, unknown> = {};
-  if (process.env.ANTHROPIC_API_KEY) env.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (process.env.ANTHROPIC_API_KEY) {
+    env.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  } else if (process.env.ZHIPU_API_KEY) {
+    // 智谱 GLM 经 Anthropic 兼容端点（D4 补充）
+    env.anthropicApiKey = process.env.ZHIPU_API_KEY;
+    env.baseUrl = ZHIPU_ANTHROPIC_BASE_URL;
+    env.model = ZHIPU_DEFAULT_MODEL;
+  }
+  if (process.env.ANTHROPIC_BASE_URL) env.baseUrl = process.env.ANTHROPIC_BASE_URL;
   if (process.env.ARCLIGHT_HOST) env.host = process.env.ARCLIGHT_HOST;
   if (process.env.ARCLIGHT_PORT) env.port = Number(process.env.ARCLIGHT_PORT);
   if (process.env.ARCLIGHT_MODEL) env.model = process.env.ARCLIGHT_MODEL;
