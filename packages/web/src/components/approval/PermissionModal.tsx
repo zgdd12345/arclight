@@ -108,8 +108,11 @@ export function PermissionModal({ command }: { command: CommandClient }) {
   const [respondedAskId, setRespondedAskId] = useState<string | null>(null);
   const denyRef = useRef<HTMLButtonElement | null>(null);
 
-  // askId 变化时把焦点强制落在「拒绝」（fail-closed）。
+  // askId 变化时：复位「已决定」标记（避免上一条审批的 respondedAskId 卡住下一条队列里的
+  // 审批），并把焦点强制落在「拒绝」（fail-closed）。当前 ask 从 pendingApprovals 消失时
+  // （内核 envelope 已清除），ask 变 null → 组件返回 null 卸载，模态真正关闭。
   useEffect(() => {
+    setRespondedAskId(null);
     if (askId) denyRef.current?.focus();
   }, [askId]);
 

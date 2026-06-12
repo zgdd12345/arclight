@@ -132,6 +132,86 @@ describe("SessionReducer 事件语义", () => {
     expect(s.pendingApprovals[0]?.askId).toBe("a1");
   });
 
+  const ask = (askId: string, callId: string, seq?: number) =>
+    ev(
+      "permission.ask",
+      {
+        askId,
+        callId,
+        risk: "high",
+        cls: "irreversible",
+        action: "bash",
+        detail: { command: "rm -rf build/" },
+        expiresAt: 1_700_000_060_000,
+      },
+      seq,
+    );
+
+  it("审批解决：同 callId 的 tool.output 到达即移除对应 pendingApproval（内核 envelope 为准）", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), ev("turn.started", { turnId: "t1" }));
+    s = reduce(
+      s,
+      ev("tool.requested", {
+        callId: "c1",
+        name: "bash",
+        argsPreview: "rm -rf build/",
+        riskTier: "confirm",
+        riskClass: "write",
+        turnId: "t1",
+      }),
+    );
+    s = reduce(s, ask("a1", "c1"));
+    expect(s.pendingApprovals).toHaveLength(1);
+    // deny 路径同样落 error envelope —— 二者都应清掉这条审批，避免 fail-closed 遮罩长存。
+    s = reduce(s, ev("tool.output", { callId: "c1", status: "error", preview: "DENIED" }));
+    expect(s.pendingApprovals).toHaveLength(0);
+  });
+
+  it("审批兜底：turn.completed 清空全部 pendingApprovals（模态不得活过本轮）", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), ask("a1", "c1"));
+    s = reduce(s, ask("a2", "c2"));
+    expect(s.pendingApprovals).toHaveLength(2);
+    s = reduce(s, ev("turn.completed", { turnId: "t1", status: "completed" }));
+    expect(s.pendingApprovals).toHaveLength(0);
+    expect(s.turn.status).toBe("completed");
+  });
+
+  it("审批兜底：interrupted 与 session.error 各自清空全部 pendingApprovals", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), ask("a1", "c1"));
+    s = reduce(s, ev("interrupted", { turnId: "t1", reason: "user" }));
+    expect(s.pendingApprovals).toHaveLength(0);
+    expect(s.turn.status).toBe("interrupted");
+
+    let s2 = reduce(initialState("s1"), ask("a1", "c1"));
+    s2 = reduce(
+      s2,
+      ev("session.error", {
+        error: {
+          status: "error",
+          tool: "provider",
+          error_class: "INTERNAL",
+          user_message: "boom",
+          retry_allowed: false,
+        },
+      }),
+    );
+    expect(s2.pendingApprovals).toHaveLength(0);
+    expect(s2.lastError).toBe("boom");
+  });
+
+  it("审批队列：解决第一条仅移除该条，第二条仍在（模态显示下一条）", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), ask("a1", "c1"));
+    s = reduce(s, ask("a2", "c2"));
+    expect(s.pendingApprovals.map((a) => a.askId)).toEqual(["a1", "a2"]);
+    s = reduce(s, ev("tool.output", { callId: "c1", status: "ok", preview: "done" }));
+    expect(s.pendingApprovals).toHaveLength(1);
+    expect(s.pendingApprovals[0]?.askId).toBe("a2");
+  });
+
   it("context.compacted / 带更高 epoch 的事件推进 epoch（只增不减）", () => {
     seqCounter = 0;
     let s = reduce(initialState("s1"), ev("turn.started", { turnId: "t1" }));

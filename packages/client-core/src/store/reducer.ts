@@ -113,12 +113,16 @@ export function reduce(state: SessionState, ev: WireEvent): SessionState {
 
     case "tool.output": {
       const e = ev as Extract<ArcEvent, { t: "tool.output" }>;
-      return patchTool(base, e.callId, (p) => ({
+      // 内核 envelope 是审批的「解决信号」：同 callId 的 tool.output（allow 落 ok / deny 落
+      // error）到达即清掉对应 pendingApproval —— 与 PermissionModal「不前端乐观删除、以内核
+      // 事件为准」的 fail-closed 纪律一致。
+      const patched = patchTool(base, e.callId, (p) => ({
         ...p,
         status: e.status,
         outputPreview: e.preview,
         ...(e.spillRef !== undefined ? { spillRef: e.spillRef } : {}),
       }));
+      return clearApproval(patched, (a) => a.callId === e.callId);
     }
 
     case "permission.ask": {
@@ -145,17 +149,18 @@ export function reduce(state: SessionState, ev: WireEvent): SessionState {
 
     case "turn.completed": {
       const e = ev as Extract<ArcEvent, { t: "turn.completed" }>;
-      return { ...base, turn: { id: e.turnId, status: e.status } };
+      // 终态兜底：被取消/过期的审批可能不产生 tool.output；模态不得活过本轮。
+      return clearAllApprovals({ ...base, turn: { id: e.turnId, status: e.status } });
     }
 
     case "session.error": {
       const e = ev as Extract<ArcEvent, { t: "session.error" }>;
-      return { ...base, lastError: e.error.user_message };
+      return clearAllApprovals({ ...base, lastError: e.error.user_message });
     }
 
     case "interrupted": {
       const e = ev as Extract<ArcEvent, { t: "interrupted" }>;
-      return { ...base, turn: { id: e.turnId, status: "interrupted" } };
+      return clearAllApprovals({ ...base, turn: { id: e.turnId, status: "interrupted" } });
     }
 
     default:
@@ -197,6 +202,19 @@ function appendPartToCurrentAssistant(
       { id: `tool-${turnId ?? part.callId}`, role: "assistant", parts: [part] },
     ],
   };
+}
+
+// 移除满足 pred 的 pendingApproval；无命中则共享原引用（零重渲染）。
+function clearApproval(state: SessionState, pred: (a: PendingApproval) => boolean): SessionState {
+  const next = state.pendingApprovals.filter((a) => !pred(a));
+  if (next.length === state.pendingApprovals.length) return state;
+  return { ...state, pendingApprovals: next };
+}
+
+// 终态兜底：清空全部 pendingApprovals；已空则共享原引用。
+function clearAllApprovals(state: SessionState): SessionState {
+  if (state.pendingApprovals.length === 0) return state;
+  return { ...state, pendingApprovals: [] };
 }
 
 function patchTool(

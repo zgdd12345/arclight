@@ -1,4 +1,4 @@
-import type { ArcEvent } from "@arclight/protocol";
+import { type ArcEvent, parseWireEvent } from "@arclight/protocol";
 import { EpochTracker } from "../epoch";
 import type { HttpClient } from "./httpClient";
 import { parseSseStream } from "./stream";
@@ -18,6 +18,7 @@ export type EventStreamOptions = {
   onEvents: (batch: ArcEvent[]) => void; // 合批后回调（含 snapshot 重建的事件）
   onResync?: (snapshot: Snapshot, reason: string) => void;
   onStatus?: (status: ConnectionStatus) => void;
+  onFrameError?: (raw: string, issues: string[]) => void; // 单帧解析/校验失败（不断连）
   coalesceMs?: number;
   backoffBaseMs?: number;
   backoffCapMs?: number;
@@ -118,8 +119,24 @@ export class EventStreamManager {
         this.attempt = 0; // 纪律② 成功复位
         for await (const frame of parseSseStream(res.body as ReadableStream<Uint8Array>)) {
           if (this.stopped) break;
-          const e = JSON.parse(frame.data) as ArcEvent;
-          this.dispatch(e);
+          // 纪律④ 单帧容错：JSON 解析或信封校验失败只跳过该帧，
+          // 不推进 maxSeq，不断连——一条坏帧不应代价整条流的重连。
+          // 用 parseWireEvent（宽容版）：未知 `t` 是 forward-compat 一等公民，
+          // 照常 dispatch 推进 maxSeq/epoch，由 reducer 静默忽略；
+          // 若在此丢弃，重连 afterSeq 会卡在未知事件之前无限重放。
+          let raw: unknown;
+          try {
+            raw = JSON.parse(frame.data);
+          } catch {
+            this.opts.onFrameError?.(frame.data, ["invalid JSON"]);
+            continue;
+          }
+          const result = parseWireEvent(raw);
+          if (!result.ok) {
+            this.opts.onFrameError?.(frame.data, result.issues);
+            continue;
+          }
+          this.dispatch(result.value);
         }
         // 服务器正常断流 → 走重连
       } catch {
