@@ -13,6 +13,15 @@ export type Risk = "low" | "med" | "high";
 
 export const DEFAULT_TTL_MS = 60_000;
 
+/** 未知 askId（已清理/伪造/过期回收）。C1 approve 路由捕获后回 ASK_NOT_FOUND ack，
+ *  而非让 transition 抛出未处理异常导致 HTTP 500。 */
+export class ApprovalNotFoundError extends Error {
+  constructor(askId: string) {
+    super(`approval not found: ${askId}`);
+    this.name = "ApprovalNotFoundError";
+  }
+}
+
 export type CreateAskInput = {
   sessionId: string;
   turnId: string;
@@ -62,7 +71,7 @@ export class ApprovalService {
   ): ApprovalStatus {
     return this.db.transaction((tx) => {
       const row = tx.select().from(approvals).where(eq(approvals.id, askId)).get();
-      if (!row) throw new Error(`approval not found: ${askId}`);
+      if (!row) throw new ApprovalNotFoundError(askId);
       if (row.status !== "pending") return row.status; // 幂等：已终态
       // 过期优先级：到期后无论请求什么决议，结果都是 expired（内核权威）
       const effective: Exclude<ApprovalStatus, "pending"> =

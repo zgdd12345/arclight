@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { type ArcAck, parseArcCommand } from "@arclight/protocol";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import type { ApprovalPolicy } from "../../approval/policy";
+import { ApprovalNotFoundError } from "../../approval/service";
 import type { Db } from "../../db/client";
 import { sessions, turns } from "../../db/schema";
 import type { EventBus } from "../../events/bus";
@@ -61,13 +62,20 @@ export function createCommandsRoute(deps: {
           );
         }
         // 同 session 单 active turn（runner 登记为权威，DB 行为兜底）
+        // DB 兜底覆盖全部"活跃"终态：queued/running/awaiting_approval，
+        // 防止 runner 未注册（mock 模式）或崩溃孤儿行时两次并发提交均通过。
         if (runner?.isActive(cmd.sessionId)) {
           return c.json(ackErr(cmd.commandId, "TURN_ACTIVE", "session has an active turn"), 409);
         }
         const active = db
           .select({ id: turns.id })
           .from(turns)
-          .where(and(eq(turns.sessionId, cmd.sessionId), eq(turns.status, "running")))
+          .where(
+            and(
+              eq(turns.sessionId, cmd.sessionId),
+              inArray(turns.status, ["queued", "running", "awaiting_approval"]),
+            ),
+          )
           .get();
         if (active) return c.json(ackErr(cmd.commandId, "TURN_ACTIVE", active.id), 409);
 
@@ -82,14 +90,22 @@ export function createCommandsRoute(deps: {
           })
           .run();
         // fire-and-forget：事件经 appendEvent 落库后由 bus 推给 SSE
+        // baseEpoch 透传至准入 append 作 expectedEpoch：上面的 epoch 预检是事务外 TOCTOU 读，
+        // 真正的 seq/epoch 不变式守护在首个 append 的事务内复核（appendEvent expectedEpoch）。
         if (runner) {
-          void runner.startTurn({ sessionId: cmd.sessionId, turnId, userText: cmd.input.text });
+          void runner.startTurn({
+            sessionId: cmd.sessionId,
+            turnId,
+            userText: cmd.input.text,
+            baseEpoch: cmd.input.baseEpoch,
+          });
         } else {
           void runMockTurn(
             { db, bus },
             {
               sessionId: cmd.sessionId,
               turnId,
+              baseEpoch: cmd.input.baseEpoch,
               ...(deps.mockDeltaMs ? { deltaMs: deps.mockDeltaMs } : {}),
             },
           );
@@ -105,9 +121,17 @@ export function createCommandsRoute(deps: {
       case "approve": {
         if (!approvals)
           return c.json(ackErr(cmd.commandId, "ASK_NOT_FOUND", "approvals unavailable"), 404);
-        const status = approvals.decide(cmd.askId, cmd.decision);
-        // 决议落地（allowed/denied）或已终态（expired/cancelled）均回 ok；挂起的 loop 轮询感知
-        return c.json({ ok: true, commandId: cmd.commandId, status } satisfies ArcAck);
+        try {
+          const status = approvals.decide(cmd.askId, cmd.decision);
+          // 决议落地（allowed/denied）或已终态（expired/cancelled）均回 ok；挂起的 loop 轮询感知
+          return c.json({ ok: true, commandId: cmd.commandId, status } satisfies ArcAck);
+        } catch (err) {
+          // 未知 askId（已清理/伪造）→ 契约 ASK_NOT_FOUND ack，而非未处理 500
+          if (err instanceof ApprovalNotFoundError) {
+            return c.json(ackErr(cmd.commandId, "ASK_NOT_FOUND", cmd.askId), 404);
+          }
+          throw err;
+        }
       }
       case "declareCap":
       case "resume":

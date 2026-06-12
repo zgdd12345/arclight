@@ -60,6 +60,8 @@ const echoTool: Tool<{ text: string }, { echoed: string }> = {
     description: "echo back",
     isReadOnly: true,
     isConcurrencySafe: true,
+    executesShellCommands: false,
+    mutatesWorkspace: false,
     riskTier: "safe",
     riskClass: "read",
     timeoutMs: 1000,
@@ -291,11 +293,15 @@ describe("不变量 10：retryable 错误 ≤MAX 重试", () => {
       makeDeps({ callProvider: provider, maxRetries: 2 }),
     );
     expect(provider.calls).toHaveLength(3); // 1 + 2 重试
-    expect(events.at(-1)?.t).toBe("session.error");
+    // BUG1：耗尽重试后须 session.error → 终态 turn.completed(failed)，否则 SSE 端 turn 永卡 running
+    expect(events.some((e) => e.t === "session.error")).toBe(true);
+    const last = events.at(-1) as Extract<ArcEvent, { t: "turn.completed" }>;
+    expect(last.t).toBe("turn.completed");
+    expect(last.status).toBe("failed");
     expect(outcome.status).toBe("failed");
   });
 
-  test("不可重试：单次调用即 session.error", async () => {
+  test("不可重试：单次调用即 session.error + 终态 turn.completed(failed)（BUG1）", async () => {
     const provider = scriptedProvider([
       {
         result: {
@@ -314,7 +320,73 @@ describe("不变量 10：retryable 错误 ≤MAX 重试", () => {
       { t: "session.error" }
     >;
     expect(ToolErrorEnvelopeSchema.strict().safeParse(err.error).success).toBe(true);
+    // BUG1：不可重试错误也必须发终态 turn 事件（session.error 之后紧跟 turn.completed failed）
+    const last = events.at(-1) as Extract<ArcEvent, { t: "turn.completed" }>;
+    expect(last.t).toBe("turn.completed");
+    expect(last.status).toBe("failed");
+    const errIdx = events.findIndex((e) => e.t === "session.error");
+    expect(events.length - 1).toBe(errIdx + 1); // turn.completed 紧随 session.error
     expect(outcome.status).toBe("failed");
+  });
+});
+
+describe("BUG2：retryable 重试的重流文本落独立 messageId（不与残文续接）", () => {
+  test("首尝试流出部分文本后 retryable 错误 → 重试文本用不同 messageId", async () => {
+    const provider = scriptedProvider([
+      {
+        // 第 1 尝试：流出部分文本后报可重试错误
+        parts: [{ type: "text-delta", text: "部分答案" }],
+        result: {
+          text: "部分答案",
+          toolCalls: [],
+          finishReason: "error",
+          retryable: true,
+          errorMessage: "rate limited",
+        },
+      },
+      {
+        // 第 2 尝试（重试，round 不变）：成功
+        parts: [{ type: "text-delta", text: "完整答案" }],
+        result: { text: "完整答案", toolCalls: [], finishReason: "stop" },
+      },
+    ]);
+    const { events, outcome } = await drain(
+      makeState(),
+      makeDeps({ callProvider: provider, maxRetries: 2 }),
+    );
+    const deltas = events.filter((e) => e.t === "message.delta") as Extract<
+      ArcEvent,
+      { t: "message.delta" }
+    >[];
+    expect(deltas).toHaveLength(2);
+    // 两次流式 message.delta 的 messageId 必须不同——重试文本不会续接到残文
+    expect(deltas[0]?.messageId).not.toBe(deltas[1]?.messageId);
+    expect(outcome.status).toBe("completed");
+  });
+});
+
+describe("BUG3：finishReason=length（输出截断）不静默", () => {
+  test("provider 报 length → session.error 提示 + turn.completed(completed)，部分答案仍交付", async () => {
+    const provider = scriptedProvider([
+      {
+        parts: [{ type: "text-delta", text: "被截断的部分答案" }],
+        result: { text: "被截断的部分答案", toolCalls: [], finishReason: "length" },
+      },
+    ]);
+    const state = makeState();
+    const { events, outcome } = await drain(state, makeDeps({ callProvider: provider }));
+    const err = events.find((e) => e.t === "session.error") as Extract<
+      ArcEvent,
+      { t: "session.error" }
+    >;
+    expect(err).toBeDefined(); // 截断必须可观测
+    expect(err.error.user_message).toContain("truncated");
+    const last = events.at(-1) as Extract<ArcEvent, { t: "turn.completed" }>;
+    expect(last.t).toBe("turn.completed");
+    expect(last.status).toBe("completed"); // 部分答案仍交付，终态 completed
+    expect(outcome.status).toBe("completed");
+    // 部分答案已入 messages（交付）
+    expect(state.messages.at(-1)).toMatchObject({ role: "assistant", content: "被截断的部分答案" });
   });
 });
 

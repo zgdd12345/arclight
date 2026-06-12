@@ -96,4 +96,20 @@ describe("CheckpointTracker shadow-git", () => {
     const c = await t.commit("empty");
     expect(c.ref).toMatch(/^[0-9a-f]{40}$/);
   });
+
+  test("latest() 返回最新行（等价 list().at(-1)），空表返回 null", async () => {
+    const t = mkTracker();
+    expect(t.latest()).toBeNull();
+    writeFileSync(join(workTree, "a"), "1");
+    await t.commit("c1");
+    writeFileSync(join(workTree, "a"), "2");
+    await t.commit("c2");
+    writeFileSync(join(workTree, "a"), "3");
+    const c3 = await t.commit("c3");
+    const latest = t.latest();
+    expect(latest?.label).toBe("c3");
+    expect(latest?.ref).toBe(c3.ref);
+    // 与全表 list 的末行一致（dedicated ORDER BY rowid DESC LIMIT 1 不改变语义）
+    expect(latest?.id).toBe(t.list().at(-1)?.id);
+  });
 });

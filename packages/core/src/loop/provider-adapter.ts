@@ -72,13 +72,26 @@ export function makeCallProvider(profile: ProviderProfile): CallProvider {
         }
       }
       const usage = await res.usage;
+      // 真实 finishReason 必须透传（BUG3）：被 maxOutputTokens 截断时 AI SDK 报 "length"，
+      // 绝不能伪装成 "stop"（否则截断静默，下游无从感知）。tool-call 收尾仍归一为 tool-calls。
+      const aiFinish = await res.finishReason;
+      const finishReason =
+        aiFinish === "length" ? "length" : toolCalls.length > 0 ? "tool-calls" : "stop";
+      // cache 计量（BUG5）：cachedInputTokens=命中（读）；Anthropic providerMetadata 携带写入量。
+      const meta = await res.providerMetadata;
+      const cacheWriteTokens = Number(
+        (meta?.anthropic as { cacheCreationInputTokens?: number } | undefined)
+          ?.cacheCreationInputTokens ?? 0,
+      );
       return {
         text,
         toolCalls,
-        finishReason: toolCalls.length > 0 ? "tool-calls" : "stop",
+        finishReason,
         usage: {
           inputTokens: usage.inputTokens ?? 0,
           outputTokens: usage.outputTokens ?? 0,
+          cacheReadTokens: usage.cachedInputTokens ?? 0,
+          cacheWriteTokens: cacheWriteTokens,
         },
       };
     } catch (e) {

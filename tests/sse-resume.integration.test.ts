@@ -269,4 +269,31 @@ describe("C1 防线", () => {
     expect(a1.ok && a2.ok).toBe(true);
     if (a1.ok && a2.ok) expect(a2.turnId).toBe(a1.turnId);
   });
+
+  // 回归：DB 兜底覆盖 queued/awaiting_approval（mock 模式无 runner.isActive）
+  test("TURN_ACTIVE：queued turn 阻止第二次提交（DB 兜底）", async () => {
+    await createSession("it-guard1");
+    // 直接插入 queued turn，模拟 runner 崩溃留下的孤儿行
+    sqlite.exec(
+      "INSERT INTO turns (id, session_id, command_id, status, input) " +
+        "VALUES ('guard-t1', 'it-guard1', 'guard-cmd1', 'queued', '{}')",
+    );
+    const ack = await commands.submit("it-guard1", { text: "y", agent: "code", baseEpoch: 0 });
+    expect(ack.ok).toBe(false);
+    if (!ack.ok) expect(ack.code).toBe("TURN_ACTIVE");
+    sqlite.exec("DELETE FROM turns WHERE id = 'guard-t1'");
+  });
+
+  test("TURN_ACTIVE：awaiting_approval turn 阻止第二次提交（DB 兜底）", async () => {
+    await createSession("it-guard2");
+    // 直接插入 awaiting_approval turn，模拟审批挂起期间并发提交
+    sqlite.exec(
+      "INSERT INTO turns (id, session_id, command_id, status, input) " +
+        "VALUES ('guard-t2', 'it-guard2', 'guard-cmd2', 'awaiting_approval', '{}')",
+    );
+    const ack = await commands.submit("it-guard2", { text: "y", agent: "code", baseEpoch: 0 });
+    expect(ack.ok).toBe(false);
+    if (!ack.ok) expect(ack.code).toBe("TURN_ACTIVE");
+    sqlite.exec("DELETE FROM turns WHERE id = 'guard-t2'");
+  });
 });

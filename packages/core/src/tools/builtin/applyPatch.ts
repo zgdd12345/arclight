@@ -30,6 +30,8 @@ export const applyPatchTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>>
       "Edit workspace files with SEARCH/REPLACE blocks. SEARCH must match the file content exactly (whitespace-flexible and ... elision supported).",
     isReadOnly: false,
     isConcurrencySafe: false,
+    executesShellCommands: false,
+    mutatesWorkspace: true, // 编辑文件 → 打检查点
     riskTier: "confirm",
     riskClass: "write",
     timeoutMs: 15_000,

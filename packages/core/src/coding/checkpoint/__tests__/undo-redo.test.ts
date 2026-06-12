@@ -102,4 +102,32 @@ describe("undo/redo 游标", () => {
     expect((await ctl.undo()).ok).toBe(false);
     expect((await ctl.redo()).ok).toBe(false);
   });
+
+  test("服务重启：新控制器从持久化行重建 → undo/redo 仍可用（hydration）", async () => {
+    // 第一个控制器（beforeEach 的 ctl）模拟运行时三次编辑：baseline + 每个 post-edit 入栈、落库
+    await edit("v1");
+    await edit("v2");
+    await edit("v3");
+    expect(read("f.txt")).toBe("v3");
+
+    // 进程重启：内存栈丢失，全新控制器只能从 checkpoints 行 hydrate（同一 tracker/DB）
+    const fresh = new UndoRedoController(tracker);
+    expect(fresh.hasBaseline()).toBe(true); // 不再误报"无检查点"
+
+    const r1 = await fresh.undo();
+    expect(r1.ok).toBe(true);
+    expect(read("f.txt")).toBe("v2");
+    const r2 = await fresh.undo();
+    expect(r2.ok).toBe(true);
+    expect(read("f.txt")).toBe("v1");
+    const r3 = await fresh.undo(); // 回到基线（首次编辑前，空）
+    expect(r3.ok).toBe(true);
+    expect(read("f.txt")).toBeNull();
+
+    // redo 链路同样从重建栈可用
+    expect((await fresh.redo()).ok).toBe(true);
+    expect(read("f.txt")).toBe("v1");
+    expect((await fresh.redo()).ok).toBe(true);
+    expect(read("f.txt")).toBe("v2");
+  });
 });

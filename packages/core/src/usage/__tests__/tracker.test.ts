@@ -55,4 +55,23 @@ describe("UsageTracker", () => {
     t.record({ sessionId: "s", turnId: "t1", inputTokens: 1000, outputTokens: 1000 });
     expect(t.sessionTotals("s").costUsdMicros).toBe(0);
   });
+
+  test("BUG5：cacheReadTokens/cacheWriteTokens 落库到 cache 列", () => {
+    const t = new UsageTracker(db, "zhipu", "glm-4.6");
+    t.record({
+      sessionId: "s",
+      turnId: "t1",
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 70,
+    });
+    const row = sqlite
+      .query<{ cache_read_tokens: number; cache_write_tokens: number }, []>(
+        "SELECT cache_read_tokens, cache_write_tokens FROM usage WHERE session_id='s' LIMIT 1",
+      )
+      .get();
+    expect(row?.cache_read_tokens).toBe(30);
+    expect(row?.cache_write_tokens).toBe(70);
+  });
 });

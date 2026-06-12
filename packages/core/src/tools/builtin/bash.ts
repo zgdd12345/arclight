@@ -26,6 +26,8 @@ export const bashTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>> = {
       "Run a shell command inside the sandbox (workspace mounted at /workspace, no network). Output is truncated beyond 512KB.",
     isReadOnly: false,
     isConcurrencySafe: false,
+    executesShellCommands: true, // 审批 preset 据此套用 shell 黑名单+风险升级（非按 name 特判）
+    mutatesWorkspace: true, // 命令可能写文件 → 打检查点（静态无从判定，一律视为会写）
     riskTier: "confirm",
     riskClass: "write",
     timeoutMs: 130_000, // 外层壳超时 > 沙箱 wallclock

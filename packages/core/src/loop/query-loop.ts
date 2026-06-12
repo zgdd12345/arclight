@@ -42,15 +42,16 @@ export async function* queryLoop(
     if (signal.aborted) return yield* interruptedOutcome();
 
     // ── (A) 压缩边界：在两次 provider 调用之间（绝不在流式中途 / tool 配对未完成时）──
+    // BUG4：epoch++ 与 context.compacted 事件由 maybeCompact 原子落库+扇出，loop 不再单独 emit
+    // （旧实现两段非原子：崩溃可致 epoch 已进而 compacted 行缺失 → 前端永卡 STALE_EPOCH）。
     if (deps.compaction) {
-      const compacted = await deps.compaction.maybeCompact(st.messages);
-      if (compacted) {
-        yield emit({ ...base, t: "context.compacted", summarySeq: compacted.summarySeq });
-      }
+      await deps.compaction.maybeCompact(st.messages);
     }
 
     // ── (C) 单 turn provider 调用（流式 part → message.delta 合批）──
-    const messageId = `m-${st.turnId}-${round}`;
+    // BUG2：messageId 含 retries——retryable 错误 continue 不增 round，若复用同 id，
+    // 重试重流的文本会被前端 reducer 续接到已 flush 的残文上。每次尝试落独立 message。
+    const messageId = `m-${st.turnId}-${round}-r${retries}`;
     const gen = deps.callProvider(st.messages, deps.registry.schemas(), signal);
     let textBuf = "";
     let r = await gen.next();
@@ -91,9 +92,29 @@ export async function* queryLoop(
           res.retryable === true,
         ),
       });
+      // BUG1：不可重试 provider 错误也须发终态 turn 事件，否则 SSE 端 turn.status 永远卡 running。
+      yield emit({ ...base, t: "turn.completed", status: "failed" });
       return { status: "failed" };
     }
     retries = 0;
+
+    // ── (D′) 输出截断（finishReason="length"）：部分答案仍交付，但绝不静默 ──
+    // BUG3：发可恢复 session.error 提示后以 completed 收口（已交付的部分答案有效）。
+    if (res.finishReason === "length") {
+      st.messages.push({ role: "assistant", content: res.text });
+      yield emit({
+        ...base,
+        t: "session.error",
+        error: makeToolError(
+          "provider",
+          "INTERNAL",
+          "response truncated by output-token limit (maxOutputTokens); answer may be incomplete",
+          false,
+        ),
+      });
+      yield emit({ ...base, t: "turn.completed", status: "completed" });
+      return { status: "completed" };
+    }
 
     // ── append-only：assistant 消息入列（含 tool_use）──
     if (res.toolCalls.length > 0) {
@@ -158,6 +179,11 @@ export async function* queryLoop(
       });
     }
 
+    // 中断优先（abort-wins）：被中断的工具回灌 CANCELLED envelope（ok:false），亦计入 allErrored。
+    // 若中断恰落在达反射上限的那一轮，下方失败路径会把"中断"误标为 failed 并吞掉 interrupted 事件——
+    // 故 abort 必须先于反射闭环判定结算：先复查 signal，命中即走中断终态。
+    if (signal.aborted) return yield* interruptedOutcome();
+
     // ── 反射闭环上限（DEV_PLAN §2.3 ④）：本轮工具全失败 → 反射计数 +1；任一成功 → 复位。
     // 达上限即硬停，如实上报不假装成功——失败已在 tool.output 错误事件流中，turn 以 failed 收口。
     const allErrored = [...outputs.values()].every((o) => !o.ok);
@@ -176,7 +202,6 @@ export async function* queryLoop(
       yield emit({ ...base, t: "turn.completed", status: "failed" });
       return { status: "failed" };
     }
-    if (signal.aborted) return yield* interruptedOutcome();
     round++;
   }
 }
@@ -245,12 +270,14 @@ async function executeBatch(
       });
       return;
     }
-    // 写工具：执行前后检查点（pre 捕获改前态，post 捕获改后态，供 /undo /redo）
-    const isWrite = !tool.meta.isReadOnly;
-    if (isWrite && deps.checkpoint) await deps.checkpoint.pre(call.name);
+    // 改写工作区的工具：执行前后检查点（pre 捕获改前态，post 捕获改后态，供 /undo /redo）。
+    // 据 capability=mutatesWorkspace 判定（缺省回退 !isReadOnly，保持向后兼容）——
+    // 不再用 !isReadOnly 作「会写文件」的代理：bash 既非只读也确会写，仍照打检查点。
+    const mutatesWorkspace = tool.meta.mutatesWorkspace ?? !tool.meta.isReadOnly;
+    if (mutatesWorkspace && deps.checkpoint) await deps.checkpoint.pre(call.name);
     const out = await deps.executeTool(tool, call.rawArgs, ctx);
     results.set(call.callId, out);
-    if (isWrite && deps.checkpoint && out.ok) await deps.checkpoint.post(call.name);
+    if (mutatesWorkspace && deps.checkpoint && out.ok) await deps.checkpoint.post(call.name);
   };
 
   // 读批：并发池

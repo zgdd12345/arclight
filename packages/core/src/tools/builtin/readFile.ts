@@ -21,6 +21,8 @@ export const readFileTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>> =
     description: "Read a text file from the workspace. Path is relative to the workspace root.",
     isReadOnly: true,
     isConcurrencySafe: true,
+    executesShellCommands: false,
+    mutatesWorkspace: false, // 纯读，不打检查点
     riskTier: "safe",
     riskClass: "read",
     timeoutMs: 10_000,

@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectCapped } from "../collect";
+import { killWithEscalation } from "../killEscalation";
 import profile from "../profiles/p0-local.json";
 import {
   type ProbeResult,
@@ -70,11 +71,11 @@ export class LocalNonoSandbox implements SandboxService {
     const timer = setTimeout(() => {
       timedOut = true;
       entry.killed = true;
-      proc.kill();
+      killWithEscalation(proc); // SIGTERM → 2s 后 SIGKILL，防忽略 TERM 进程令 for-await 永久挂起
     }, timeoutMs);
     const onAbort = () => {
       entry.killed = true;
-      proc.kill(); // nono profile 配 kill_process_tree_on_exit 兜底子树
+      killWithEscalation(proc); // nono profile 配 kill_process_tree_on_exit 兜底子树
     };
     req.signal?.addEventListener("abort", onAbort, { once: true });
 

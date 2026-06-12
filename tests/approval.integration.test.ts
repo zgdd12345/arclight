@@ -61,6 +61,9 @@ function mkBashTool(): Tool<unknown, unknown> {
       isConcurrencySafe: false,
       riskTier: "confirm",
       riskClass: "write",
+      // capability 驱动：黑名单/风险升级据 executesShellCommands 套用（非 name==="bash" 特判）。
+      executesShellCommands: true,
+      mutatesWorkspace: true,
       timeoutMs: 5000,
       maxResultSizeBytes: 1024,
     },
@@ -279,6 +282,21 @@ describe("60s 过期：内核权威", () => {
     expect(await waitTurnDone(turnId)).toBe("completed");
     expect(execCount).toBe(0);
     expect(toolOutputEvent()?.error?.error_class).toBe("APPROVAL_EXPIRED");
+  }, 10000);
+});
+
+describe("approve 未知 askId：契约 ASK_NOT_FOUND（非未处理 500）", () => {
+  test("陈旧/伪造 askId → ASK_NOT_FOUND ack（404），不抛 500", async () => {
+    setup({
+      tool: mkWriteTool(),
+      toolCall: { callId: "c1", name: "do_write", rawArgs: { path: "a.ts" } },
+    });
+    // 不创建任何 approval，直接对陌生 askId 发决议
+    const res = await approve("00000000-0000-0000-0000-000000000000", "allow");
+    expect(res.status).toBe(404);
+    const ack = (await res.json()) as { ok: boolean; code?: string };
+    expect(ack.ok).toBe(false);
+    expect(ack.code).toBe("ASK_NOT_FOUND");
   }, 10000);
 });
 

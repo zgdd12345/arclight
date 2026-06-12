@@ -23,16 +23,32 @@ export class RepoMap {
   }
 
   async collectTags(relPaths: string[]): Promise<Tag[]> {
-    const all: Tag[] = [];
-    for (const rel of relPaths) {
-      const cached = this.cache?.get(this.repoRoot, rel);
-      if (cached) {
-        all.push(...cached);
-        continue;
+    // 有界并发抽 Tag（冷缓存下最多 200 文件，串行 await 过慢）；结果按 relPaths 原序回填
+    // 保证确定性输出。cache get/put 同步，仅 extractTags 跨 await，故无缓存竞态。
+    const results: Tag[][] = new Array(relPaths.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const i = next++;
+        if (i >= relPaths.length) return;
+        const rel = relPaths[i];
+        if (rel === undefined) continue;
+        const cached = this.cache?.get(this.repoRoot, rel);
+        if (cached) {
+          results[i] = cached;
+          continue;
+        }
+        const tags = await extractTags(this.repoRoot, rel);
+        this.cache?.put(this.repoRoot, rel, tags);
+        results[i] = tags;
       }
-      const tags = await extractTags(this.repoRoot, rel);
-      this.cache?.put(this.repoRoot, rel, tags);
-      all.push(...tags);
+    };
+    const pool = Math.min(8, relPaths.length);
+    await Promise.all(Array.from({ length: pool }, () => worker()));
+
+    const all: Tag[] = [];
+    for (const tags of results) {
+      if (tags) all.push(...tags);
     }
     return all;
   }

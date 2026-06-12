@@ -1,4 +1,5 @@
 import { collectCapped } from "../collect";
+import { killWithEscalation } from "../killEscalation";
 import profile from "../profiles/p0-local.json";
 import {
   type ProbeResult,
@@ -85,11 +86,11 @@ export class DockerFallbackSandbox implements SandboxService {
     const timer = setTimeout(() => {
       timedOut = true;
       entry.killed = true;
-      proc.kill();
+      killWithEscalation(proc); // SIGTERM → 2s 后 SIGKILL，防忽略 TERM 进程令 for-await 永久挂起
     }, timeoutMs);
     const onAbort = () => {
       entry.killed = true;
-      proc.kill();
+      killWithEscalation(proc); // 同上，中止路径等价处理
     };
     req.signal?.addEventListener("abort", onAbort, { once: true });
 

@@ -118,5 +118,9 @@ async function withTimeout<T>(p: Promise<T>, ms: number, signal: AbortSignal): P
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     if (onAbort) signal.removeEventListener("abort", onAbort);
+    // 竞速失败方善后：timeout/abort 胜出后 p 仍在飞，稍后若 reject 则无人接 → process 级
+    // unhandledRejection（崩 Bun）。挂个空 catch 兜底——race 结果此刻已定，不影响返回值；
+    // p 若已是胜出方（resolve/reject 均已被 await 消费），再挂 catch 亦无害。
+    void Promise.resolve(p).catch(() => {});
   }
 }

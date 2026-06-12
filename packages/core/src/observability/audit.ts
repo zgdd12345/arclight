@@ -37,7 +37,7 @@ export class AuditLog {
   }
 
   write(runId: string, entry: Omit<AuditEntry, "ts">): void {
-    const line = JSON.stringify({ ts: Date.now(), ...entry }) + "\n";
+    const line = `${JSON.stringify({ ts: Date.now(), ...entry })}\n`;
     try {
       appendFileSync(join(this.dir, `${runId}.jsonl`), line);
     } catch {

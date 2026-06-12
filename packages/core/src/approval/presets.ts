@@ -1,4 +1,4 @@
-import type { RiskClass, RiskTier, Tool } from "@arclight/protocol";
+import type { RiskClass, RiskTier, Tool, ToolMeta } from "@arclight/protocol";
 import { parse as shellParse } from "shell-quote";
 
 // 风险分类（P0 §C 审批策略 + DEV_PLAN §2.3）：
@@ -66,25 +66,107 @@ export function bashTokens(command: string): string[] {
   }
 }
 
-/** 按 shell 控制符拆段（;|&&|\|\||\| 与换行）。过度拆分只会更安全（fail-closed），
- *  引号内的分隔符虽可能误拆，但误拆产生的段不匹配黑名单即放行，不引入危险。 */
+/** 按 shell 控制符拆段（;|&&|\|\||\||& 与换行）。过度拆分只会更安全（fail-closed），
+ *  引号内的分隔符虽可能误拆，但误拆产生的段不匹配黑名单即放行，不引入危险。
+ *  "&"（后台/分隔）必须在此出现：shell-quote 把 `true & sudo id` 的 & 吐成 op token，
+ *  分词后首命令仍是 true，会漏掉 & 之后的 sudo——故在拆段阶段就按 & 切开。 */
 function splitSegments(command: string): string[] {
   return command
-    .split(/\s*(?:&&|\|\||;|\||\n)\s*/)
+    .split(/\s*(?:&&|\|\||;|\||&|\n)\s*/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-export function checkBlacklist(command: string, depth = 0): { blocked: boolean; reason?: string } {
-  for (const seg of splitSegments(command)) {
-    const tokens = bashTokens(seg);
-    for (const m of BLACKLIST_MATCHERS) {
-      if (m.test(tokens, seg)) return { blocked: true, reason: m.reason };
+// 良性前缀启动器：本身无害，但会把真实首命令往后挪（env sudo id / nohup env sudo id）。
+// 剥掉它们（连同自身的选项 token、以及 nice/timeout 的一个数值/时长参数）后再看新的首命令。
+const LAUNCHERS = new Set([
+  "env",
+  "nohup",
+  "nice",
+  "time",
+  "eval",
+  "exec",
+  "command",
+  "setsid",
+  "stdbuf",
+  "ionice",
+  "timeout",
+]);
+// 这两个 launcher 在选项之后还吃一个数值/时长位置参数（nice 10 / timeout 5s）。
+const NUMERIC_ARG_LAUNCHERS = new Set(["nice", "timeout"]);
+
+/** 迭代剥离前导 VAR=val 赋值 + 良性启动器，暴露真正的首命令 token。
+ *  recall 偏向：宁可多剥（把更靠后的命令当首命令判）也不漏判危险命令。 */
+function stripLaunchers(tokens: string[]): string[] {
+  let toks = tokens;
+  for (let guard = 0; guard <= tokens.length; guard++) {
+    let i = 0;
+    // 1. 前导环境赋值（FOO=bar sudo id）
+    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i] ?? "")) i++;
+    const head = toks[i];
+    if (head === undefined || !LAUNCHERS.has(head)) return toks.slice(i);
+    i++; // 启动器本身
+    // 2. 启动器自己的选项 token（-x / --foo）
+    while (i < toks.length && (toks[i] ?? "").startsWith("-")) i++;
+    // 3. nice/timeout：再吃一个数值/时长参数
+    if (NUMERIC_ARG_LAUNCHERS.has(head) && i < toks.length && /^\d+[smhd]?$/.test(toks[i] ?? "")) {
+      i++;
     }
-    // 递归进 sh/bash/zsh -c '<inner>'，防把危险命令藏进内层 shell（深度限 3 防爆栈）
-    if (depth < 3 && (tokens[0] === "sh" || tokens[0] === "bash" || tokens[0] === "zsh")) {
-      const ci = tokens.indexOf("-c");
-      const inner = ci >= 0 ? tokens[ci + 1] : undefined;
+    toks = toks.slice(i);
+  }
+  return toks;
+}
+
+/** 抠出命令替换体：$(...)（按括号计数处理嵌套）与 `...`（反引号）。
+ *  shell-quote 会把替换体打散成 operator token（首命令判级看不到内部），
+ *  故必须直接从原始串里提取替换体再递归过黑名单（echo $(sudo id) / echo `sudo id`）。 */
+function extractCommandSubstitutions(command: string): string[] {
+  const bodies: string[] = [];
+  // $(...)：括号计数支持嵌套 $(echo $(sudo id))
+  for (let i = 0; i < command.length; i++) {
+    if (command[i] === "$" && command[i + 1] === "(") {
+      let depth = 1;
+      let j = i + 2;
+      for (; j < command.length && depth > 0; j++) {
+        if (command[j] === "(") depth++;
+        else if (command[j] === ")") depth--;
+      }
+      if (depth === 0) bodies.push(command.slice(i + 2, j - 1));
+    }
+  }
+  // `...`：反引号（shell 本身不支持裸嵌套，简单成对匹配即可）
+  for (const m of command.matchAll(/`([^`]*)`/g)) bodies.push(m[1] ?? "");
+  return bodies;
+}
+
+export function checkBlacklist(command: string, depth = 0): { blocked: boolean; reason?: string } {
+  // 命令替换体先抠出来递归判（shell-quote 会把 $(...)/`...` 打散成 op token，漏掉内部命令）
+  if (depth < 3) {
+    for (const body of extractCommandSubstitutions(command)) {
+      const r = checkBlacklist(body, depth + 1);
+      if (r.blocked) return r;
+    }
+  }
+  for (const seg of splitSegments(command)) {
+    // 剥掉良性前缀启动器（env/nohup/timeout… + VAR=val），用真实首命令判级
+    const head = stripLaunchers(bashTokens(seg));
+    for (const m of BLACKLIST_MATCHERS) {
+      if (m.test(head, seg)) return { blocked: true, reason: m.reason };
+    }
+    // 递归进 sh/bash/zsh -c '<inner>'，防把危险命令藏进内层 shell（深度限 3 防爆栈）。
+    // 组合 flag（-lc/-cx）也算携带 -c：任一匹配 /^-[A-Za-z]*c[A-Za-z]*$/ 的 flag 后，
+    // 取其后第一个非 flag token 作内层脚本。
+    if (depth < 3 && (head[0] === "sh" || head[0] === "bash" || head[0] === "zsh")) {
+      const flagIdx = head.findIndex((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
+      let inner: string | undefined;
+      if (flagIdx >= 0) {
+        for (let j = flagIdx + 1; j < head.length; j++) {
+          if (!(head[j] ?? "").startsWith("-")) {
+            inner = head[j];
+            break;
+          }
+        }
+      }
       if (inner) {
         const r = checkBlacklist(inner, depth + 1);
         if (r.blocked) return r;
@@ -108,8 +190,10 @@ export function classify(
 ): RiskDecision {
   const { meta } = tool;
 
-  // bash：先过黑名单（永拒），再按命令内容可能升级风险
-  if (meta.name === "bash") {
+  // 命令执行器（capability=executesShellCommands，非 name 特判）：先过黑名单（永拒），
+  // 再按命令内容可能升级风险。约定命令落在 `command` 实参——任何会执行 shell 的工具都纳管，
+  // 不再让未来的命令执行器因名字不叫 "bash" 而绕过黑名单。
+  if (meta.executesShellCommands) {
     const command =
       typeof (args as { command?: unknown })?.command === "string"
         ? (args as { command: string }).command
@@ -134,16 +218,17 @@ export function classify(
     kind: "ask",
     risk,
     cls: meta.riskClass,
-    action: actionLabel(meta.name, args),
+    action: actionLabel(meta, args),
   };
 }
 
-function actionLabel(name: string, args: unknown): string {
-  if (name === "bash" && typeof (args as { command?: unknown })?.command === "string") {
+function actionLabel(meta: ToolMeta, args: unknown): string {
+  // 命令执行器：标签即命令全文（capability 驱动，非 name 特判）
+  if (meta.executesShellCommands && typeof (args as { command?: unknown })?.command === "string") {
     return (args as { command: string }).command;
   }
   if (typeof (args as { path?: unknown })?.path === "string") {
-    return `${name} ${(args as { path: string }).path}`;
+    return `${meta.name} ${(args as { path: string }).path}`;
   }
-  return name;
+  return meta.name;
 }

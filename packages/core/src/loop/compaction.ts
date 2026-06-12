@@ -5,7 +5,7 @@ import type { CallProvider, LlmMessage } from "./types";
 // 触发：estimateTokens(messages) > effectiveWindow。
 // 时机铁律：只在两次 provider 调用之间，绝不在 tool_use/tool_result 未配对完成时压缩
 //   （否则配对断裂，模型收到悬挂 tool_use）。
-// 动作：LLM 摘要早期消息 → 替换为单条 summary → 调用方 epoch++ + yield context.compacted。
+// 动作：LLM 摘要早期消息 → 替换为单条 summary → 调用方（runner）在同一事务内 epoch++ 并落 context.compacted。
 // 注：token 计数用 @anthropic-ai/tokenizer 作估计（GLM 实际 tokenizer 不同，但触发阈值用估计足够）。
 
 export const DEFAULT_EFFECTIVE_WINDOW = 120_000; // 阶段一保守窗口

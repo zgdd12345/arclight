@@ -40,8 +40,18 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
     // ③ epoch-jump
     if (reqEpoch !== undefined && reqEpoch < session.epoch) {
       const compactedAt = lastCompactedSeq(db, sessionId);
-      if (compactedAt !== null && afterSeq < compactedAt) {
-        return c.json({ reason: "epoch-jump", snapshotUrl }, 409);
+      if (compactedAt !== null) {
+        if (afterSeq < compactedAt) {
+          return c.json({ reason: "epoch-jump", snapshotUrl }, 409);
+        }
+      } else {
+        // BUG4 读侧兜底：epoch 已进却无 context.compacted 行（崩溃半完成态/历史脏数据）。
+        // 旧实现因 compactedAt==null 直接漏判，客户端永久卡 STALE_EPOCH。
+        // 降级用 minAvailableSeq 作压缩边界：书签早于最早可用帧即强制 epoch-jump 重建。
+        const min = minAvailableSeq(db, sessionId);
+        if (min === null || afterSeq < min) {
+          return c.json({ reason: "epoch-jump", snapshotUrl }, 409);
+        }
       }
     }
     // ② buffer-expired：请求点之后的第一帧已不可得
@@ -53,12 +63,14 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
     return streamSSE(c, async (stream) => {
       let live = true;
       let maxSent = afterSeq;
-      const queue: string[] = [];
+      // 队列元素携带类型化 seq：避免 regex 解析 wire format 的脆弱性；
+      // 心跳用哨兵 seq=-1（不参与去重，直接透传）。
+      const queue: Array<{ seq: number; frame: string }> = [];
       let wake: (() => void) | null = null;
 
       // 先订阅后 replay：窗口期事件进队列，凭 seq 去重，无缝隙
       const unsubscribe = bus.subscribe(sessionId, (e) => {
-        queue.push(formatSseFrame(e));
+        queue.push({ seq: e.seq, frame: formatSseFrame(e) });
         wake?.();
       });
       stream.onAbort(() => {
@@ -76,22 +88,21 @@ export function createEventsRoute(deps: { db: Db; bus: EventBus; heartbeatMs?: n
         }
 
         heartbeat = setInterval(() => {
-          queue.push(HEARTBEAT_FRAME);
+          queue.push({ seq: -1, frame: HEARTBEAT_FRAME });
           wake?.();
         }, heartbeatMs);
 
         while (live) {
           while (queue.length > 0) {
-            const frame = queue.shift();
-            if (frame === undefined) break;
-            // 实时帧凭 id 行去重（replay 与订阅窗口可能重叠）
-            const m = frame.match(/^id: (\d+)\n/);
-            if (m?.[1] !== undefined) {
-              const seq = Number(m[1]);
-              if (seq <= maxSent) continue;
-              maxSent = seq;
+            const item = queue.shift();
+            if (item === undefined) break;
+            // 实时帧凭类型化 seq 去重（replay 与订阅窗口可能重叠）；
+            // seq=-1 为心跳哨兵，不参与去重，直接透传。
+            if (item.seq >= 0) {
+              if (item.seq <= maxSent) continue;
+              maxSent = item.seq;
             }
-            await stream.write(frame);
+            await stream.write(item.frame);
           }
           if (!live) break;
           await new Promise<void>((resolve) => {

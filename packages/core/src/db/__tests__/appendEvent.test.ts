@@ -70,6 +70,25 @@ describe("appendEvent", () => {
     expect(s?.nextSeq).toBe(1);
   });
 
+  test("admission happy path: matching expectedEpoch appends under that epoch", () => {
+    // 准入 append（turn.started）：baseEpoch == session.epoch → 正常落库并 stamp 该 epoch
+    db.update(sessions).set({ epoch: 3 }).where(eq(sessions.id, "s1")).run();
+    const e = appendEvent({ db }, draft("t1"), { expectedEpoch: 3 });
+    expect(e.epoch).toBe(3);
+    expect(e.seq).toBe(1);
+    const row = db.select().from(events).where(eq(events.seq, 1)).get();
+    expect(row?.event).toEqual(e); // 落库对象 == yield 对象
+  });
+
+  test("stale expectedEpoch rolls back fully — 无事件落库（准入不在错误 epoch 下写入）", () => {
+    db.update(sessions).set({ epoch: 2 }).where(eq(sessions.id, "s1")).run();
+    expect(() => appendEvent({ db }, draft("t1"), { expectedEpoch: 1 })).toThrow(StaleEpochError);
+    // 事务回滚：既无半写事件行，seq 亦未被消耗
+    expect(db.select().from(events).all().length).toBe(0);
+    const s = db.select().from(sessions).where(eq(sessions.id, "s1")).get();
+    expect(s?.nextSeq).toBe(1);
+  });
+
   test("throws SessionNotFoundError for unknown session", () => {
     expect(() => appendEvent({ db }, { ...draft("t1"), sessionId: "nope" })).toThrow(
       SessionNotFoundError,

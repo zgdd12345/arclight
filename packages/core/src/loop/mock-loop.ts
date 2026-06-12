@@ -13,18 +13,21 @@ const CANNED =
 
 export async function runMockTurn(
   deps: { db: Db; bus: EventBus },
-  args: { sessionId: string; turnId: string; deltaMs?: number },
+  args: { sessionId: string; turnId: string; baseEpoch: number; deltaMs?: number },
 ): Promise<void> {
   const { db } = deps;
-  const { sessionId, turnId } = args;
+  const { sessionId, turnId, baseEpoch } = args;
   const deltaMs = args.deltaMs ?? 15;
-  const emit = (draft: Parameters<typeof appendEvent>[1]) => appendEvent(deps, draft);
+  const emit = (draft: Parameters<typeof appendEvent>[1], opts?: { expectedEpoch?: number }) =>
+    appendEvent(deps, draft, opts);
   try {
     db.update(turns)
       .set({ status: "running", startedAt: new Date() })
       .where(eq(turns.id, turnId))
       .run();
-    emit({ v: 1, t: "turn.started", sessionId, turnId });
+    // 准入乐观锁：首个 append 以 client 声明 baseEpoch 在事务内复核 session.epoch。陈旧提交
+    // （绕过路由 TOCTOU 预检）抛 StaleEpochError → 下方 catch 干净置 failed，绝不在错误 epoch 下落库。
+    emit({ v: 1, t: "turn.started", sessionId, turnId }, { expectedEpoch: baseEpoch });
     const messageId = `m-${turnId}`;
     const step = Math.ceil(CANNED.length / 6);
     for (let i = 0; i < CANNED.length; i += step) {

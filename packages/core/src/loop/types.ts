@@ -31,11 +31,18 @@ export type ProviderToolCall = { callId: string; name: string; rawArgs: unknown 
 export type ProviderResult = {
   text: string;
   toolCalls: ProviderToolCall[];
-  finishReason: "stop" | "tool-calls" | "aborted" | "error";
+  /** "length"=被 maxOutputTokens 截断（部分答案仍交付，但必须可观测，不得静默） */
+  finishReason: "stop" | "tool-calls" | "aborted" | "error" | "length";
   /** finishReason="error" 时有效 */
   retryable?: boolean;
   errorMessage?: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  /** cacheReadTokens/cacheWriteTokens：prompt cache 命中/写入（缺省 0） */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
 };
 
 /** 给 provider 的工具形状：只有 schema，绝无 execute（不变式：工具执行 0% 交 AI SDK） */
@@ -114,17 +121,24 @@ export type LoopDeps = {
   readConcurrency?: number; // 默认 8
   /** 反射闭环上限（DEV_PLAN §2.3 ④）：连续 N 轮工具全失败即如实上报停止，不无限自校正。默认 3。 */
   maxReflections?: number;
-  /** usage 回传钩子（DEV_PLAN §3.4 可观测）：每轮 provider usage 落库 */
-  onUsage?: (u: { inputTokens: number; outputTokens: number }) => void;
+  /** usage 回传钩子（DEV_PLAN §3.4 可观测）：每轮 provider usage 落库（含 prompt cache 命中/写入） */
+  onUsage?: (u: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  }) => void;
   /** 写工具执行前后的检查点钩子（DEV_PLAN §2.3 ③）。写工具 = !isReadOnly。 */
   checkpoint?: {
     pre(toolName: string): Promise<void>;
     post(toolName: string): Promise<void>;
   };
-  /** 压缩钩子（DEV_PLAN §2.1）。在两次 provider 调用之间检查并执行；返回新 epoch + summary。
-   *  loop 凭返回值 yield context.compacted。绝不在 tool 配对未完成时调用。 */
+  /** 压缩钩子（DEV_PLAN §2.1）。在两次 provider 调用之间检查并执行。绝不在 tool 配对未完成时调用。
+   *  契约（BUG4 修复后）：epoch++ 与 context.compacted 事件由本钩子在【同一 SQLite 事务】内原子落库，
+   *  并在提交后扇出 bus——loop 不再单独 emit context.compacted（杜绝崩溃半完成态卡死 STALE_EPOCH）。
+   *  返回 true 表示本轮已压缩。 */
   compaction?: {
-    maybeCompact(messages: LlmMessage[]): Promise<{ epoch: number; summarySeq: number } | null>;
+    maybeCompact(messages: LlmMessage[]): Promise<boolean>;
   };
 };
 

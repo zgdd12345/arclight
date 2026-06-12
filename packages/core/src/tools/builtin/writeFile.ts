@@ -15,6 +15,8 @@ export const writeFileTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>> 
       "Create or overwrite a text file in the workspace. Prefer apply_patch for editing existing files.",
     isReadOnly: false,
     isConcurrencySafe: false,
+    executesShellCommands: false,
+    mutatesWorkspace: true, // 写文件 → 打检查点
     riskTier: "confirm",
     riskClass: "write",
     timeoutMs: 10_000,

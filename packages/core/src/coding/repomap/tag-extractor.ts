@@ -91,6 +91,12 @@ const KEYWORDS = new Set([
   "typeof",
 ]);
 
+// 选择最佳抽取结果：AST 为 null 或空数组时均降级至正则（空数组等同失败，防止静默空走屏蔽 regex）
+export function selectExtractResult(viaAst: Tag[] | null, regexFallback: () => Tag[]): Tag[] {
+  if (viaAst !== null && viaAst.length > 0) return viaAst;
+  return regexFallback();
+}
+
 export async function extractTags(repoRoot: string, relPath: string): Promise<Tag[]> {
   let src: string;
   try {
@@ -100,7 +106,7 @@ export async function extractTags(repoRoot: string, relPath: string): Promise<Ta
   }
   if (await ensureParser()) {
     const viaAst = extractViaTreeSitter(src, relPath);
-    if (viaAst) return viaAst;
+    return selectExtractResult(viaAst, () => extractViaRegex(src, relPath)); // AST 空时也降级
   }
   return extractViaRegex(src, relPath); // R2 降级
 }

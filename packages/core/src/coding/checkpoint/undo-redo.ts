@@ -15,7 +15,27 @@ export class UndoRedoController {
   private stack: string[] = [];
   private cursor = -1; // 指向 stack 中当前工作区对应的 ref；-1 = 空
 
-  constructor(private readonly tracker: CheckpointTracker) {}
+  constructor(private readonly tracker: CheckpointTracker) {
+    this.hydrate();
+  }
+
+  /** 从已持久化的 checkpoints 行重建可导航栈（服务重启后 /undo 不再误报"无检查点"）。
+   *  运行时 record 语义为「首个 pre-edit 作基线 + 每个 post-edit 作可导航点」，
+   *  故此处同样以首行为基线、其后仅取 post-edit 行；游标置于栈尾（最新态）。
+   *  注：曾 undo 后未再写即结束的 session，其废弃 redo 行也会被纳入——这些都是真实
+   *  落库的 commit 态，重建到栈尾可接受（与内存态的细微差异为固有限制）。 */
+  private hydrate(): void {
+    const rows = this.tracker.list();
+    if (rows.length === 0) return;
+    const first = rows[0];
+    if (!first) return;
+    this.stack = [first.ref];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (row?.label?.startsWith("post-edit")) this.stack.push(row.ref);
+    }
+    this.cursor = this.stack.length - 1;
+  }
 
   /** 记录一个可导航检查点（基线或 post-edit）。曾 undo 后的新写 → 截断 redo 历史。 */
   record(ref: string): void {

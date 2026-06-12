@@ -97,6 +97,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
   const shutdown = () => {
     removeServerJson(arclightDir);
     server.stop();
+    runner.dispose(); // 释放跨 turn 持有的 RepoMap SQLite 句柄
     sqlite.close();
     process.exit(0);
   };

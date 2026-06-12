@@ -15,7 +15,7 @@ import {
 import { ArtifactStore } from "../packages/core/src/artifacts/store";
 import { createDb } from "../packages/core/src/db/client";
 import { runMigrations } from "../packages/core/src/db/migrate";
-import { sessions, workspaces } from "../packages/core/src/db/schema";
+import { sessions, turns, workspaces } from "../packages/core/src/db/schema";
 import { EventBus } from "../packages/core/src/events/bus";
 import { AgentRunner } from "../packages/core/src/loop/runner";
 import type { CallProvider, ProviderResult } from "../packages/core/src/loop/types";
@@ -49,6 +49,7 @@ let db: ReturnType<typeof createDb>["db"];
 let sqlite: ReturnType<typeof createDb>["sqlite"];
 let server: ReturnType<typeof Bun.serve>;
 let http: HttpClient;
+let runner: AgentRunner;
 
 function setup() {
   root = mkdtempSync(join(tmpdir(), "arclight-epoch-"));
@@ -80,7 +81,7 @@ function setup() {
     return { text: "SUMMARY of prior turns", toolCalls: [], finishReason: "stop" };
   };
 
-  const runner = new AgentRunner({
+  runner = new AgentRunner({
     db,
     bus,
     registry: new ToolRegistry().register(bloatTool()),
@@ -190,4 +191,53 @@ describe("epoch-jump 真实端到端（compaction 驱动）", () => {
     expect(resyncs).toContain("epoch-jump");
     expect(esm.epochTracker.epoch).toBe(finalEpoch); // 书签追平真实压缩后的 epoch
   }, 15000);
+
+  test("BUG4 读侧兜底：epoch 已进但无 context.compacted 行 → 仍 409 epoch-jump", async () => {
+    await fetch(http.url("/api/sessions"), {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ id: "s" }),
+    });
+    // 模拟崩溃半完成态：epoch 推进但 context.compacted 事件缺失（旧非原子实现的遗留窗口）
+    sqlite.query("UPDATE sessions SET epoch = 1 WHERE id = 's'").run();
+    const noCompacted = sqlite
+      .query("SELECT 1 FROM events WHERE type='context.compacted' AND session_id='s' LIMIT 1")
+      .get();
+    expect(noCompacted).toBeNull();
+    // 旧 epoch=0 连接：旧实现因 lastCompactedSeq==null 漏判 → 客户端永卡 STALE_EPOCH；
+    // 修复后降级用 minAvailableSeq 兜底 → 必须 409 epoch-jump
+    const res = await fetch(http.url("/api/sessions/s/events?afterSeq=0&epoch=0"), { headers: H });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { reason: string }).reason).toBe("epoch-jump");
+  });
+
+  test("准入乐观锁：epoch 在路由预检与准入 append 之间推进 → turn 干净 failed，旧 epoch 下无事件落库", async () => {
+    // 模拟 TOCTOU 缝隙：提交在 epoch=0 通过路由预检（baseEpoch==epoch），随后压缩把 epoch 推到 1，
+    // 准入 append 才执行。startTurn 携 baseEpoch=0 直驱准入路径，绕过路由预检（预检已在 epoch=0 放行）。
+    sqlite.query("UPDATE sessions SET epoch = 1 WHERE id = 's'").run();
+    const turnId = "stale-admit-turn";
+    // route 正常会先落 turn 行（queued）；此处手动落，直驱准入 append
+    db.insert(turns)
+      .values({ id: turnId, sessionId: "s", commandId: "cmd-stale", status: "queued", input: {} })
+      .run();
+
+    await runner.startTurn({ sessionId: "s", turnId, userText: "do work", baseEpoch: 0 });
+
+    // turn 干净置 failed（不崩 runner、不留 running 孤儿）
+    const status = sqlite
+      .query<{ status: string }, [string]>("SELECT status FROM turns WHERE id = ?")
+      .get(turnId)?.status;
+    expect(status).toBe("failed");
+    // 关键不变式：陈旧 epoch 下绝无事件落库（准入事务整体回滚）
+    const ev = sqlite
+      .query<{ n: number }, [string]>("SELECT 1 AS n FROM events WHERE turn_id = ? LIMIT 1")
+      .get(turnId);
+    expect(ev).toBeNull();
+    // seq 未被消耗，active 登记已清理
+    const nextSeq = sqlite
+      .query<{ nextSeq: number }, []>("SELECT next_seq AS nextSeq FROM sessions WHERE id = 's'")
+      .get()?.nextSeq;
+    expect(nextSeq).toBe(1);
+    expect(runner.isActive("s")).toBe(false);
+  });
 });

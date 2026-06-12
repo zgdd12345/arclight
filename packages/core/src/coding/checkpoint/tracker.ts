@@ -113,9 +113,23 @@ export class CheckpointTracker {
       }));
   }
 
+  /** 本 session 最新检查点（ORDER BY rowid DESC LIMIT 1）——避免 list() 全表反序列化。 */
   latest(): CheckpointRow | null {
-    const list = this.list();
-    return list.at(-1) ?? null;
+    const r = this.db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.sessionId, this.sessionId))
+      .orderBy(sql`rowid DESC`)
+      .limit(1)
+      .get();
+    if (!r) return null;
+    return {
+      id: r.id,
+      ref: r.ref,
+      label: r.label,
+      changedFiles: r.changedFiles,
+      createdAt: r.createdAt,
+    };
   }
 
   get shadowGitDir(): string {
