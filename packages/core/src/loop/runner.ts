@@ -147,6 +147,58 @@ export class AgentRunner {
       .run();
   }
 
+  /** turn 准入（/undo/redo 与正常分支共用，消除重复）：置 running + 发 turn.started
+   *  （首个 append 带 expectedEpoch 乐观锁）。返回 false 表示准入失败——已干净置 failed
+   *  并 abort+清 active，调用方须立即 return。
+   *
+   *  关键：startTurn 系 fire-and-forget（commands.ts `void runner.startTurn(...)`），且本段在
+   *  外层 try/catch（其 finally 才 ac.abort()+active.delete）之前。若准入处的非 Stale 异常
+   *  （appendEvent SQLITE_BUSY / SessionNotFoundError / 抛错的 bus 订阅者）上抛逃出 startTurn，
+   *  则已 commit 的 turns 行永卡 running、ac 不 abort、active 不清 → isActive() 恒真 →
+   *  该 session 后续每次 submit 都被 TURN_ACTIVE 409 楔死至进程重启。故此处一律就地置 failed，
+   *  绝不向 void 重抛。 */
+  private admitTurn(
+    turnId: string,
+    sessionId: string,
+    ac: AbortController,
+    emit: (draft: Parameters<typeof appendEvent>[1]) => ArcEvent,
+  ): boolean {
+    this.deps.db
+      .update(turns)
+      .set({ status: "running", startedAt: new Date() })
+      .where(eq(turns.id, turnId))
+      .run();
+    try {
+      emit({ v: 1, t: "turn.started", sessionId, turnId });
+      return true;
+    } catch (e) {
+      if (e instanceof StaleEpochError) {
+        // 准入处陈旧 epoch：turn 干净置 failed（retry_allowed），不留 running 孤儿
+        this.failStaleTurn(turnId, e);
+      } else {
+        // 非 Stale 准入故障：与外层 catch 一致地干净置 failed（避免楔死 session）
+        this.deps.db
+          .update(turns)
+          .set({
+            status: "failed",
+            error: {
+              status: "error",
+              tool: "runner",
+              error_class: "INTERNAL",
+              user_message: e instanceof Error ? e.message.slice(0, 200) : "internal error",
+              retry_allowed: false,
+            },
+            completedAt: new Date(),
+          })
+          .where(eq(turns.id, turnId))
+          .run();
+      }
+      ac.abort();
+      this.active.delete(sessionId);
+      return false;
+    }
+  }
+
   /** fire-and-forget：调用方（C1 handler）先落 turn 行再调本方法 */
   async startTurn(args: {
     sessionId: string;
@@ -174,22 +226,7 @@ export class AgentRunner {
     // /undo /redo：拦截特殊指令，不进 provider 循环（DEV_PLAN §2.3 ③）
     const slash = args.userText.trim();
     if (slash === "/undo" || slash === "/redo") {
-      db.update(turns)
-        .set({ status: "running", startedAt: new Date() })
-        .where(eq(turns.id, turnId))
-        .run();
-      try {
-        emit({ v: 1, t: "turn.started", sessionId, turnId });
-      } catch (e) {
-        // 准入处陈旧 epoch：turn 干净置 failed，不进 undo/redo 逻辑（不留 running 孤儿）
-        if (e instanceof StaleEpochError) {
-          this.failStaleTurn(turnId, e);
-          ac.abort();
-          this.active.delete(sessionId);
-          return;
-        }
-        throw e;
-      }
+      if (!this.admitTurn(turnId, sessionId, ac, emit)) return;
       const action = slash === "/undo" ? "undo" : "redo";
       let res: { ok: boolean; message: string };
       try {
@@ -215,6 +252,10 @@ export class AgentRunner {
       this.active.delete(sessionId);
       return;
     }
+
+    // 受理即反馈：turn.started 在慢准备（checkpoint/RepoMap 冷加载首 turn 可达数十秒）
+    // 之前立即发出，客户端立刻看到 running；准入乐观锁（expectedEpoch）也在此生效。
+    if (!this.admitTurn(turnId, sessionId, ac, emit)) return;
 
     const sc = this.getCheckpoint(sessionId, cwd);
 
@@ -337,10 +378,6 @@ export class AgentRunner {
       },
     };
 
-    db.update(turns)
-      .set({ status: "running", startedAt: new Date() })
-      .where(eq(turns.id, turnId))
-      .run();
     try {
       const gen = queryLoop(state, loopDeps);
       let r = await gen.next();
@@ -378,6 +415,13 @@ export class AgentRunner {
 
   /** 枚举工作区源文件（有界）→ RepoMap 文本。tree-sitter 不可用自动正则降级（R2）。
    *  mentioned 标识符从用户输入粗提；chatFiles 暂空（U7 接 active turn 涉及文件）。 */
+  /** 冷路径预热（tokenizer/tree-sitter 加载 + tag 缓存填充）：serve 启动后后台调用，
+   *  消掉首 turn 的数十秒准备空窗。失败静默（预热不挡服务）。 */
+  async warmup(cwd: string): Promise<void> {
+    if (!this.deps.repoMap) return;
+    await this.buildRepoMap(cwd, "").catch(() => {});
+  }
+
   private async buildRepoMap(cwd: string, userText: string): Promise<string> {
     const glob = new Bun.Glob("**/*.{ts,tsx,js,jsx}");
     const files: string[] = [];

@@ -56,6 +56,11 @@ export class ApprovalPolicy implements ApprovalSeam {
   private readonly pollMs: number;
   private readonly dangerFullAccess: boolean;
   private readonly audit: AuditFn | undefined;
+  // 本会话工具白名单（sessionId → 已"本会话允许"的工具名集合）。内存态，进程级；
+  // 重启/新会话自然清空（session 语义）。仅短路本应弹审批的 confirm 档（risk=med）——
+  // 黑名单/admin_only 在 classify 内先判，永不经此放行；且高危（risk=high）的批准
+  // 绝不被记入本表（见 rememberToolForSession：纵深防御，挡住客户端伪造 scope 的提权）。
+  private readonly sessionAllow = new Map<string, Set<string>>();
 
   /** interrupt 路径：把该 turn 下所有 pending 审批转 cancelled。
    *  注：waitForDecision 也会在 signal.aborted 时自行 cancel；此方法保证即便无活跃挂起者，
@@ -86,6 +91,22 @@ export class ApprovalPolicy implements ApprovalSeam {
       );
       return { decision: "deny", reason: decision.reason, errorClass: "PERMISSION_DENIED" };
     }
+    // 本会话白名单短路：用户此前对该工具点过「本会话内允许」→ 直接放行，不再弹审批。
+    // 位置在 classify 之后（L81）——黑名单/admin_only 已在 classify 内拒掉（返回 deny），
+    // 绝不会走到这里；故此短路只可能命中 confirm 档（risk=med）。且白名单本身只收 med 档
+    // （rememberToolForSession 拒收 high），双重保证高危工具不被本会话自动放行。
+    // bash 属 confirm 档：一次「本会话允许」会自动放行后续非黑名单 shell——这是按设计接受的，
+    // 因为 bash 受沙箱约束（docker --network none、仅项目目录 rw、shadow-git checkpoint 覆盖改动），
+    // 爆炸半径有界。
+    if (this.sessionAllow.get(ctx.sessionId)?.has(tool.meta.name)) {
+      this.audit?.(
+        "approval.asked",
+        { tool: tool.meta.name, action: decision.action, autoAllow: "session" },
+        ctx.sessionId,
+      );
+      return { decision: "allow" };
+    }
+
     this.audit?.(
       "approval.asked",
       { tool: tool.meta.name, action: decision.action, risk: decision.risk },
@@ -190,8 +211,42 @@ export class ApprovalPolicy implements ApprovalSeam {
     return appendEvent({ db: this.db, bus: this.bus }, draft);
   }
 
-  /** C1 approve 命令入口 */
-  decide(askId: string, decision: "allow" | "deny"): string {
+  /** C1 approve 命令入口。scope=session & allow → 把该 askId 对应的工具记入本会话白名单，
+   *  后续同工具的 confirm 档自动放行（黑名单仍先拦）。 */
+  decide(askId: string, decision: "allow" | "deny", scope: "once" | "session" = "once"): string {
+    if (decision === "allow" && scope === "session") this.rememberToolForSession(askId);
     return this.service.decide(askId, decision);
+  }
+
+  /** 由 askId 反查 (sessionId, 工具名)，记入本会话白名单。行缺失则静默跳过（决议本身仍照常）。
+   *  纵深防御（防客户端伪造 scope 提权）：仅 confirm 档（risk=med）可被本会话记住；
+   *  高危（risk=high，即 admin_only，含 dangerFullAccess 放行的 admin_only）绝不记住——
+   *  这类工具每次调用都必须重新弹审批。本次「允许这一发」仍由 service.decide 照常生效，
+   *  此处只跳过「记住」。服务端以 approvals.risk 为准，不信任客户端传入的 scope。 */
+  private rememberToolForSession(askId: string): void {
+    const a = this.db
+      .select({
+        sessionId: approvals.sessionId,
+        toolCallId: approvals.toolCallId,
+        risk: approvals.risk,
+      })
+      .from(approvals)
+      .where(eq(approvals.id, askId))
+      .get();
+    if (!a?.toolCallId) return;
+    // 高危永不记住：挡住「客户端把 admin_only 工具伪造成 session-scope」的提权路径
+    if (a.risk === "high") return;
+    const tc = this.db
+      .select({ name: toolCalls.name })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, a.toolCallId))
+      .get();
+    if (!tc) return;
+    let set = this.sessionAllow.get(a.sessionId);
+    if (!set) {
+      set = new Set();
+      this.sessionAllow.set(a.sessionId, set);
+    }
+    set.add(tc.name);
   }
 }

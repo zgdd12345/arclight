@@ -31,8 +31,8 @@ export async function* queryLoop(
     return { status: "interrupted" };
   };
 
-  yield emit({ ...base, t: "turn.started" });
-
+  // turn.started 由 runner 在准入时刻立即发出（受理即有反馈，不等 checkpoint/RepoMap
+  // 冷准备——首 turn 曾因此空窗 80 秒）；本循环从 provider 调用起步。
   let retries = 0;
   let round = 0;
   let reflections = 0; // 连续工具全失败轮数（反射闭环计数）
