@@ -117,10 +117,10 @@ export function PermissionModal({ command }: { command: CommandClient }) {
   }, [askId]);
 
   const decide = useCallback(
-    (decision: "allow" | "deny") => {
+    (decision: "allow" | "deny", scope: "once" | "session" = "once") => {
       if (!ask || respondedAskId === ask.askId) return;
       setRespondedAskId(ask.askId);
-      void command.approve(ask.askId, decision);
+      void command.approve(ask.askId, decision, scope);
     },
     [ask, respondedAskId, command],
   );
@@ -224,6 +224,7 @@ export function PermissionModal({ command }: { command: CommandClient }) {
           </button>
 
           {dangerous ? (
+            // 高危（不可逆/资金/risk=high）：只许逐次按住批准，不提供「本会话允许」
             <HoldToConfirm
               color={levelColor}
               label="按住批准"
@@ -231,15 +232,32 @@ export function PermissionModal({ command }: { command: CommandClient }) {
               onConfirm={() => decide("allow")}
             />
           ) : (
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => decide("allow")}
-              className="border px-4 py-2 text-[13px] font-[700] uppercase tracking-wide disabled:opacity-40"
-              style={{ borderColor: levelColor, color: levelColor, fontFamily: "var(--font-mono)" }}
-            >
-              批准
-            </button>
+            <>
+              {/* 本会话内允许此工具：批准本次 + 记住，后续同工具不再弹（黑名单仍永远先拦） */}
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => decide("allow", "session")}
+                className="border px-4 py-2 text-[13px] font-[700] text-muted disabled:opacity-40"
+                style={{ borderColor: "var(--hairline)", fontFamily: "var(--font-mono)" }}
+                title="本会话内此工具的后续操作自动放行；黑名单命令仍会被拒"
+              >
+                本会话允许
+              </button>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => decide("allow")}
+                className="border px-4 py-2 text-[13px] font-[700] uppercase tracking-wide disabled:opacity-40"
+                style={{
+                  borderColor: levelColor,
+                  color: levelColor,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                批准
+              </button>
+            </>
           )}
         </div>
 

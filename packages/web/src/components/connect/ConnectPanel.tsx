@@ -28,8 +28,10 @@ export function ConnectPanel() {
     setError(null);
     const o = origin.trim();
     const t = token.trim();
-    if (!o || !t) {
-      setError("origin 与 token 均为必填。");
+    // token 可留空：内核以 ARCLIGHT_DEV_NO_AUTH=1 启动时鉴权放行（测试用）；
+    // 否则空 token 会被内核 401 拒回，错误正常提示。
+    if (!o) {
+      setError("origin 必填。");
       return;
     }
     writeCreds({ origin: o, token: t });

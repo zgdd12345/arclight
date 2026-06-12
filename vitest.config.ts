@@ -5,7 +5,11 @@ import { defineConfig } from "vitest/config";
 // vitest 只覆盖端无关包（protocol / client-core / web）。集成测配置在 slice1 引入。
 export default defineConfig({
   test: {
-    include: ["packages/protocol/**/*.test.ts", "packages/client-core/**/*.test.ts"],
+    include: [
+      "packages/protocol/**/*.test.ts",
+      "packages/client-core/**/*.test.ts",
+      "packages/web/**/*.test.ts",
+    ],
     pool: "forks",
     testTimeout: 30_000,
     coverage: {

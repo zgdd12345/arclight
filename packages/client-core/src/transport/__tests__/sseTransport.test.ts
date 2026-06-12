@@ -251,4 +251,45 @@ describe("EventStreamManager 单帧容错（纪律④）", () => {
     // maxSeq 推进到 3：重连不会重放未知事件
     expect((manager as unknown as { maxSeq: number }).maxSeq).toBe(3);
   });
+
+  it("401 终态：停止重连（仅 1 次 fetch）、status=closed、onAuthError 上报", async () => {
+    // token 失效/轮换后退避重试永远 401——曾把控制台刷出上百条错误。401/403 必须终态。
+    let fetchCalls = 0;
+    let authErrorStatus = -1;
+    const statusLog: ConnectionStatus[] = [];
+
+    let resolveAuthError!: () => void;
+    const authErrored = new Promise<void>((r) => {
+      resolveAuthError = r;
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      fetchCalls++;
+      return Promise.resolve({ ok: false, status: 401, body: null } as unknown as Response);
+    }) as unknown as typeof fetch;
+
+    const manager = new EventStreamManager({
+      http: makeHttp(),
+      sessionId: "s1",
+      onEvents() {},
+      onStatus(s) {
+        statusLog.push(s);
+      },
+      onAuthError(httpStatus) {
+        authErrorStatus = httpStatus;
+        resolveAuthError();
+      },
+      // 若 401 未终态而走退避，sleep 立即返回会导致 fetch 被疯狂重调——用计数断言抓住
+      sleep: () => Promise.resolve(),
+    });
+
+    manager.start();
+    await authErrored;
+    // 留一个微任务窗口：若实现错误地继续循环，fetchCalls 会增长
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(fetchCalls).toBe(1); // 不重试
+    expect(authErrorStatus).toBe(401);
+    expect(statusLog.at(-1)).toBe("closed");
+  });
 });

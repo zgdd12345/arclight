@@ -6,7 +6,15 @@ export class CommandClient {
   constructor(private readonly http: HttpClient) {}
 
   private newId(): string {
-    return crypto.randomUUID();
+    // crypto.randomUUID 仅安全上下文（HTTPS/localhost）可用；局域网 http 页面
+    // （如 http://10.x.x.x:3000）拿不到它 → 用 getRandomValues 手搓 UUIDv4 回退
+    //（getRandomValues 不受安全上下文限制）。
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = ((b[6] as number) & 0x0f) | 0x40; // version 4
+    b[8] = ((b[8] as number) & 0x3f) | 0x80; // variant 10
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
   }
 
   private async send(cmd: ArcCommand): Promise<ArcAck> {
@@ -22,7 +30,11 @@ export class CommandClient {
     return this.send({ k: "interrupt", v: 1, commandId: this.newId(), turnId, reason });
   }
 
-  approve(askId: string, decision: "allow" | "deny"): Promise<ArcAck> {
-    return this.send({ k: "approve", v: 1, commandId: this.newId(), askId, decision });
+  approve(
+    askId: string,
+    decision: "allow" | "deny",
+    scope: "once" | "session" = "once",
+  ): Promise<ArcAck> {
+    return this.send({ k: "approve", v: 1, commandId: this.newId(), askId, decision, scope });
   }
 }

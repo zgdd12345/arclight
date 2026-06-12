@@ -19,6 +19,7 @@ export type EventStreamOptions = {
   onResync?: (snapshot: Snapshot, reason: string) => void;
   onStatus?: (status: ConnectionStatus) => void;
   onFrameError?: (raw: string, issues: string[]) => void; // 单帧解析/校验失败（不断连）
+  onAuthError?: (httpStatus: number) => void; // 401/403：token 失效/无权，已终止重连
   coalesceMs?: number;
   backoffBaseMs?: number;
   backoffCapMs?: number;
@@ -112,6 +113,14 @@ export class EventStreamManager {
           await this.resync(body.reason, body.snapshotUrl);
           this.attempt = 0;
           continue; // 重建书签后立刻重连
+        }
+        // 鉴权失败是终态：token 失效/轮换后重试永远 401，退避重连只会无限刷错
+        //（核心重启换 token 的旧标签页曾以此打出上百条 401）。停止循环并上报。
+        if (res.status === 401 || res.status === 403) {
+          this.stopped = true;
+          this.status("closed");
+          this.opts.onAuthError?.(res.status);
+          return;
         }
         if (!res.ok || !res.body) throw new Error(`SSE connect failed: ${res.status}`);
 

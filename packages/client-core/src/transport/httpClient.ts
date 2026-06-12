@@ -6,9 +6,13 @@ export type HttpClientOptions = {
 
 // 薄 fetch 包装：统一 bearer 与 JSON 编解码。前端直连内核，无 proxy 中间层（D7）。
 export class HttpClient {
-  private readonly fetchImpl: typeof fetch;
+  // 类型收窄为纯调用签名：Bun 的 typeof fetch 还带 preconnect 静态属性，包装函数不需要
+  private readonly fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>;
   constructor(private readonly opts: HttpClientOptions) {
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    // 裸 fetch 存为实例属性后以 this.fetchImpl(...) 调用，浏览器里 this 变成
+    // HttpClient 实例 → Chrome 抛 "Illegal invocation"（WebIDL this 校验；
+    // Bun/Node 不校验所以测试发现不了）。箭头包装保持全局调用。
+    this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   headers(extra: Record<string, string> = {}): Record<string, string> {
