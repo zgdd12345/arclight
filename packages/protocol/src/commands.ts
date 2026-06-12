@@ -32,6 +32,9 @@ export const ApproveCommandSchema = z.object({
   k: z.literal("approve"),
   askId: z.string().min(1),
   decision: z.enum(["allow", "deny"]),
+  // once = 仅本次；session = 本会话内记住该工具，后续同工具的 confirm 档自动放行
+  // （黑名单仍永远先拦）。缺省 once，向后兼容旧客户端。
+  scope: z.enum(["once", "session"]).optional(),
 });
 
 export const DeclareCapCommandSchema = z.object({
