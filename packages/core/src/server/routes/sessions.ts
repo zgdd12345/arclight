@@ -23,9 +23,26 @@ export function createSessionsRoute(deps: { db: Db; repoPath: string; arclightDi
 
   return new Hono()
     .post("/", async (c) => {
-      const body = (await c.req.json().catch(() => ({}))) as { id?: string; title?: string };
+      const body = (await c.req.json().catch(() => ({}))) as {
+        id?: string;
+        title?: string;
+        workspaceId?: string;
+      };
       const id = body.id ?? randomUUID();
-      const workspaceId = ensureWorkspace();
+      // 指定项目则挂到该 workspace（校验存在）；缺省回退默认 --repo 工作区。
+      let workspaceId: string;
+      if (body.workspaceId) {
+        const ws = db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.id, body.workspaceId))
+          .get();
+        if (!ws)
+          return c.json({ ok: false, code: "VALIDATION", message: "workspace not found" }, 400);
+        workspaceId = ws.id;
+      } else {
+        workspaceId = ensureWorkspace();
+      }
       const dup = db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, id)).get();
       if (dup) return c.json({ ok: false, code: "VALIDATION", message: "session exists" }, 409);
       db.insert(sessions)

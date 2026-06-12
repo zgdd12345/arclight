@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 
 // 配置优先级（DEV_PLAN §1.3）：process.env > .arclight/config.json（repo 级）
@@ -18,6 +18,12 @@ export const ConfigSchema = z.object({
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(43127),
   model: z.string().default("claude-sonnet-4-5"),
+  // 鉴权全局放行开关：仅当 ARCLIGHT_DEV_NO_AUTH === "1" 时为 true（保留精确 "=1" 语义）。
+  // 仅限本地测试，切勿用于暴露到不可信网络的部署。默认关闭。
+  devNoAuth: z.boolean().default(false),
+  // 项目围栏根（绝对路径）：ARCLIGHT_PROJECTS_ROOT 显式指定，否则取 repoPath 的父目录。
+  // 在 loadConfig 内据 repoPath 计算默认值，故解析后恒为已定义的绝对路径字符串。
+  projectsRoot: z.string().optional(),
 });
 export type ArclightConfig = z.infer<typeof ConfigSchema>;
 
@@ -46,6 +52,14 @@ export function loadConfig(repoPath: string): ArclightConfig {
   if (process.env.ARCLIGHT_HOST) env.host = process.env.ARCLIGHT_HOST;
   if (process.env.ARCLIGHT_PORT) env.port = Number(process.env.ARCLIGHT_PORT);
   if (process.env.ARCLIGHT_MODEL) env.model = process.env.ARCLIGHT_MODEL;
+  // 鉴权放行：精确 "=1" 语义。设置了该 env 才覆盖 config.json/默认；其余值（含 "0"）均为 false。
+  if (process.env.ARCLIGHT_DEV_NO_AUTH !== undefined) {
+    env.devNoAuth = process.env.ARCLIGHT_DEV_NO_AUTH === "1";
+  }
+  // 项目围栏根：env 显式指定则解析为绝对路径，否则默认 = repoPath 的父目录。
+  env.projectsRoot = process.env.ARCLIGHT_PROJECTS_ROOT
+    ? resolve(process.env.ARCLIGHT_PROJECTS_ROOT)
+    : resolve(repoPath, "..");
 
   const merged = { ...userFile, ...repoFile, ...env };
   const r = ConfigSchema.safeParse(merged);

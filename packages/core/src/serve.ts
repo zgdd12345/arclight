@@ -76,7 +76,25 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     usage: new UsageTracker(db, config.baseUrl ? "zhipu" : "anthropic", config.model), // 成本可观测
   });
 
-  const app = createApp({ repoPath: repo, arclightDir, db, bus, token, runner, approvals });
+  // devNoAuth / projectsRoot 由 config/load.ts 统一解析（env 优先级 + 校验 + config.json 分层）。
+  const { devNoAuth, projectsRoot } = config;
+  if (devNoAuth) {
+    log.warn(
+      "⚠ ARCLIGHT_DEV_NO_AUTH=1：bearer 鉴权已全局放行，任意/空 token 均可访问 /api/*。仅限本地测试，切勿用于暴露到不可信网络的部署。",
+    );
+  }
+  const app = createApp({
+    repoPath: repo,
+    arclightDir,
+    db,
+    bus,
+    token,
+    runner,
+    approvals,
+    devNoAuth,
+    // projectsRoot 在 loadConfig 内恒被计算，但类型为 optional；exactOptionalPropertyTypes 下条件展开。
+    ...(projectsRoot !== undefined ? { projectsRoot } : {}),
+  });
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
@@ -93,6 +111,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     repoPath: repo,
   });
   log.info({ origin: `http://${config.host}:${config.port}`, repo }, "arclight core listening");
+  void runner.warmup(repo); // 后台预热 RepoMap 冷路径（tokenizer/tree-sitter/tag 缓存），消首 turn 空窗
 
   const shutdown = () => {
     removeServerJson(arclightDir);
