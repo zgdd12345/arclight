@@ -6,6 +6,7 @@ import {
   parseArcCommand,
   parseArcEvent,
   ToolErrorEnvelopeSchema,
+  ToolMetaSchema,
 } from "../index";
 
 const baseEvent = { v: 1, sessionId: "s1", seq: 1, epoch: 0, ts: 1_700_000_000_000 } as const;
@@ -148,6 +149,57 @@ describe("ToolErrorEnvelope (5 键收口)", () => {
   it("rejects unknown error_class", () => {
     const r = ToolErrorEnvelopeSchema.safeParse({ ...valid, error_class: "OOPS" });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("ToolMeta capability 位（缺省回填）", () => {
+  const base = {
+    name: "demo",
+    description: "",
+    isReadOnly: false,
+    isConcurrencySafe: false,
+    riskTier: "confirm",
+    riskClass: "write",
+    timeoutMs: 1000,
+    maxResultSizeBytes: 1024,
+  } as const;
+
+  it("executesShellCommands 缺省回填 false（fail-safe：非命令工具不套黑名单）", () => {
+    const r = ToolMetaSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.executesShellCommands).toBe(false);
+  });
+
+  it("mutatesWorkspace 缺省回填 !isReadOnly（写工具→true）", () => {
+    const r = ToolMetaSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.mutatesWorkspace).toBe(true);
+  });
+
+  it("mutatesWorkspace 缺省回填 !isReadOnly（只读工具→false）", () => {
+    const r = ToolMetaSchema.safeParse({
+      ...base,
+      isReadOnly: true,
+      isConcurrencySafe: true,
+      riskTier: "safe",
+      riskClass: "read",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.mutatesWorkspace).toBe(false);
+  });
+
+  it("显式值优先于缺省（executesShellCommands=true 即便 name!=='bash'）", () => {
+    const r = ToolMetaSchema.safeParse({
+      ...base,
+      name: "run_shell",
+      executesShellCommands: true,
+      mutatesWorkspace: false,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.executesShellCommands).toBe(true);
+      expect(r.data.mutatesWorkspace).toBe(false);
+    }
   });
 });
 

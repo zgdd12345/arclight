@@ -10,16 +10,30 @@ export const RiskTierSchema = z.enum(["safe", "confirm", "admin_only"]);
 export type RiskTier = z.infer<typeof RiskTierSchema>;
 
 // ── 工具元数据 ──
-export const ToolMetaSchema = z.object({
-  name: z.string().min(1),
-  description: z.string(),
-  isReadOnly: z.boolean(),
-  isConcurrencySafe: z.boolean(),
-  riskTier: RiskTierSchema,
-  riskClass: RiskClassSchema,
-  timeoutMs: z.number().int().positive(),
-  maxResultSizeBytes: z.number().int().positive(),
-});
+// 能力位（capability）原则：审批/检查点等横切策略据「能力」判定，绝不按 name 特判，
+// 否则新工具（如未来的命令执行器）会静默绕过黑名单/检查点。下面两位是 P0 §C 的安全开关：
+//   executesShellCommands —— 该工具会执行任意 shell 命令 → 审批 preset 套用 shell 黑名单+风险升级。
+//   mutatesWorkspace      —— 该工具可能改写工作区文件 → query-loop 据此打影子 git 检查点（供 /undo /redo）。
+// 两位均为可选输入，parse 时回填缺省（executesShellCommands→false 走 fail-safe；
+// mutatesWorkspace→!isReadOnly 保持向后兼容）。
+export const ToolMetaSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string(),
+    isReadOnly: z.boolean(),
+    isConcurrencySafe: z.boolean(),
+    executesShellCommands: z.boolean().optional(),
+    mutatesWorkspace: z.boolean().optional(),
+    riskTier: RiskTierSchema,
+    riskClass: RiskClassSchema,
+    timeoutMs: z.number().int().positive(),
+    maxResultSizeBytes: z.number().int().positive(),
+  })
+  .transform((m) => ({
+    ...m,
+    executesShellCommands: m.executesShellCommands ?? false,
+    mutatesWorkspace: m.mutatesWorkspace ?? !m.isReadOnly,
+  }));
 export type ToolMeta = z.infer<typeof ToolMetaSchema>;
 
 // ── 5 键错误信封：绝不泄 traceback ──

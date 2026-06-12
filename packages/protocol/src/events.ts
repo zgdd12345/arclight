@@ -98,6 +98,14 @@ export const InterruptedSchema = z.object({
   reason: z.enum(["user", "abort"]),
 });
 
+// Wire 宽容信封（forward-compat 的另一半契约）：服务端先于客户端升级时会出现本版本
+// 未知的 `t`——只要 base 信封合法就必须被接受并推进 maxSeq/epoch，由 reducer 静默忽略；
+// 若消费端直接丢弃，重连 afterSeq 会停在未知事件之前，无限重放重丢。
+export const WireEventEnvelopeSchema = z.looseObject({
+  ...base,
+  t: z.string().min(1),
+});
+
 export const ArcEventSchema = z.discriminatedUnion("t", [
   SessionStartedSchema,
   TurnStartedSchema,
