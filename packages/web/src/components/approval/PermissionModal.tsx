@@ -28,19 +28,33 @@ function useApprovalNotification(
   useEffect(() => {
     if (!askId) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    if (typeof document !== "undefined" && document.visibilityState === "visible") return;
+    if (typeof document === "undefined") return;
 
-    const n = new Notification("arclight · 需要授权", {
-      body: `${riskLabel}\n${commandText.slice(0, 120)}`,
-      tag: `arclight-approval-${askId}`,
-      requireInteraction: true,
-    });
-    n.onclick = () => {
-      window.focus();
-      n.close();
+    // 一个 ask 只弹一次：到达时若已不可见立即弹；若到达时可见，则在该 ask 存续期内
+    // 首次切走标签页时补弹（修复"到达时在看、随后切走→60s 内永不提醒"的漏发窗口）。
+    let n: Notification | null = null;
+    const fire = () => {
+      if (n) return;
+      n = new Notification("arclight · 需要授权", {
+        body: `${riskLabel}\n${commandText.slice(0, 120)}`,
+        tag: `arclight-approval-${askId}`,
+        requireInteraction: true,
+      });
+      n.onclick = () => {
+        window.focus();
+        n?.close();
+      };
     };
-    // ask 解决/切换 → 关掉这条通知（避免堆积陈旧提醒）
-    return () => n.close();
+    if (document.visibilityState !== "visible") fire();
+    const onVis = () => {
+      if (document.visibilityState !== "visible") fire();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    // ask 解决/切换 → 摘监听 + 关掉通知（避免堆积陈旧提醒）
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      n?.close();
+    };
   }, [askId, commandText, riskLabel]);
 }
 
@@ -104,6 +118,12 @@ function HoldToConfirm({
     },
     [],
   );
+
+  // disabled 在按住期间翻转为 true（倒计时过期/已响应）时，按钮不再收 pointerUp/Leave，
+  // cancel() 无从触发——必须主动取消 RAF，否则 ~HOLD_MS 后仍会 onConfirm()（对已过期请求误发批准）。
+  useEffect(() => {
+    if (disabled) cancel();
+  }, [disabled, cancel]);
 
   return (
     <button

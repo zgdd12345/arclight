@@ -13,16 +13,17 @@ import {
   ThreadPrimitive,
   useComposerRuntime,
 } from "@assistant-ui/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  getProviderConfig,
-  type ProviderConfig,
-  patchProviderConfig,
-  uploadSessionFile,
-} from "../../lib/arcClient";
+import { uploadSessionFile } from "../../lib/arcClient";
 import { useArcCommand, useArcSession, useFollowUpQueue } from "../../lib/assistantRuntime";
+import {
+  applyProviderPatch,
+  getProviderConfigSnapshot,
+  refreshProviderConfig,
+  subscribeProviderConfig,
+} from "../../lib/providerConfigStore";
 import { ToolCallCard } from "../tools/ToolCallCard";
 import { ThinkingDisclosure } from "./ThinkingDisclosure";
 
@@ -175,13 +176,15 @@ function AttachButton() {
   );
 }
 
-// 模型切换（仿 ChatGPT）：全局热切换，下一次提问起生效。
+// 模型切换（仿 ChatGPT）：全局热切换，下一次提问起生效。读共享 store，与设置面同步。
 function ModelSwitcher() {
-  const [cfg, setCfg] = useState<ProviderConfig | null>(null);
+  const cfg = useSyncExternalStore(subscribeProviderConfig, getProviderConfigSnapshot, () => null);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
+  // 挂载即拉取一次；refreshProviderConfig 内部去重并发，store 拉到后不再置空，无需以 cfg 为依赖。
   useEffect(() => {
-    void getProviderConfig().then(setCfg);
+    void refreshProviderConfig();
   }, []);
 
   if (!cfg) return null;
@@ -191,12 +194,15 @@ function ModelSwitcher() {
       disabled={busy}
       onChange={(e) => {
         setBusy(true);
-        void patchProviderConfig({ model: e.target.value })
-          .then((next) => next && setCfg(next))
+        setFailed(false);
+        void applyProviderPatch({ model: e.target.value })
+          .then((ok) => setFailed(!ok))
+          .catch(() => setFailed(true))
           .finally(() => setBusy(false));
       }}
-      className="max-w-[160px] cursor-pointer rounded-lg border-none bg-transparent py-1 font-mono text-[11px] text-muted outline-none hover:text-text"
-      title="切换模型（全局，下一次提问生效）"
+      className="max-w-[160px] cursor-pointer rounded-lg border-none bg-transparent py-1 font-mono text-[11px] outline-none hover:text-text"
+      style={{ color: failed ? "var(--accent-hot)" : "var(--muted)" }}
+      title={failed ? "切换失败，请重试" : "切换模型（全局，下一次提问生效）"}
     >
       {cfg.availableModels.map((m) => (
         <option key={m} value={m}>

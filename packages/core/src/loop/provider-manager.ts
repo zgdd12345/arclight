@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ZHIPU_ANTHROPIC_BASE_URL } from "../config/load";
 import { makeCallProvider, type ProviderProfile } from "./provider-adapter";
@@ -28,7 +28,16 @@ function providerKind(baseUrl: string | undefined): ProviderInfo["provider"] {
 }
 
 // 各端点的常见可选模型（展示候选，非白名单——PATCH 接受任意非空 model）。
-const ZHIPU_MODELS = ["glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"];
+const ZHIPU_MODELS = [
+  "glm-5.2",
+  "glm-5.1",
+  "glm-5",
+  "glm-4.7",
+  "glm-4.6",
+  "glm-4.5",
+  "glm-4.5-air",
+  "glm-4.5-flash",
+];
 const ANTHROPIC_MODELS = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
 
 export class ProviderManager {
@@ -62,7 +71,15 @@ export class ProviderManager {
     };
   }
 
-  /** 运行时切换 model/thinking 并持久化到 repo 级 config.json。返回切换后信息。 */
+  /** 仅取当前 model（热路径：usage 每次 record 都调，避免 current() 的 ProviderInfo 对象
+   *  与 availableModels 数组分配）。 */
+  currentModel(): string {
+    return this.profile.model;
+  }
+
+  /** 运行时切换 model/thinking。运行时切换是真相（重建 provider，下次调用即生效）；
+   *  持久化是 best-effort——写盘失败绝不让 update 抛错（否则 PATCH 返回 500 但内存已切换，
+   *  客户端误判失败）。返回切换后信息。 */
   update(patch: ProviderPatch): ProviderInfo {
     this.profile = {
       ...this.profile,
@@ -70,24 +87,31 @@ export class ProviderManager {
       ...(patch.thinking !== undefined ? { thinking: patch.thinking } : {}),
     };
     this.provider = makeCallProvider(this.profile);
-    this.persist(patch);
+    this.persist(patch); // 内部吞写盘错误，不抛
     return this.current();
   }
 
   private persist(patch: ProviderPatch): void {
     const path = join(this.arclightDir, "config.json");
-    let existing: Record<string, unknown> = {};
-    if (existsSync(path)) {
-      try {
-        existing = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-      } catch {
-        // 损坏的 config.json：不覆盖用户文件，放弃持久化（运行时切换仍生效）
-        return;
+    try {
+      let existing: Record<string, unknown> = {};
+      if (existsSync(path)) {
+        try {
+          existing = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+        } catch {
+          // 损坏的 config.json：不覆盖用户文件，放弃持久化（运行时切换仍生效）
+          return;
+        }
       }
+      for (const k of SWITCHABLE_KEYS) {
+        if (patch[k] !== undefined) existing[k] = patch[k];
+      }
+      // 原子写：先写临时文件再 rename，避免写到一半被 kill 留下损坏 config.json（下次启动 loadConfig 抛错）。
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(existing, null, 2)}\n`);
+      renameSync(tmp, path);
+    } catch {
+      // 持久化失败（磁盘满/权限）：运行时切换已生效，仅本次不落盘——绝不上抛
     }
-    for (const k of SWITCHABLE_KEYS) {
-      if (patch[k] !== undefined) existing[k] = patch[k];
-    }
-    writeFileSync(path, `${JSON.stringify(existing, null, 2)}\n`);
   }
 }

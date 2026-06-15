@@ -79,7 +79,10 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
     arclightDir, // 启用 shadow-git 检查点 + /undo /redo
     repoMap: true, // 进 turn 注入 RepoMap 上下文（tree-sitter 不可用自动正则降级）
-    usage: new UsageTracker(db, config.baseUrl ? "zhipu" : "anthropic", config.model), // 成本可观测
+    // 成本可观测：model 传 thunk 取当前值，PATCH /api/config 热切换后记账随之更新
+    usage: new UsageTracker(db, config.baseUrl ? "zhipu" : "anthropic", () =>
+      providerManager.currentModel(),
+    ),
   });
 
   // devNoAuth / projectsRoot 由 config/load.ts 统一解析（env 优先级 + 校验 + config.json 分层）。

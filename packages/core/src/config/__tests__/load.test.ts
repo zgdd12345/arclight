@@ -1,7 +1,9 @@
 // loadConfig：devNoAuth / projectsRoot 走 ConfigSchema 统一解析（FINDING 9）。
 // 验证默认关闭、精确 "=1" 语义，以及 projectsRoot 默认 = repoPath 父目录 / env 覆盖。
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { loadConfig } from "../load";
 
 const REPO = "/tmp/arclight-cfg-test/repo";
@@ -12,6 +14,7 @@ const KEYS = [
   "ARCLIGHT_PROJECTS_ROOT",
   "ANTHROPIC_API_KEY",
   "ZHIPU_API_KEY",
+  "ARCLIGHT_MODEL",
 ];
 let saved: Record<string, string | undefined>;
 
@@ -51,5 +54,31 @@ describe("loadConfig devNoAuth / projectsRoot", () => {
   test("ARCLIGHT_PROJECTS_ROOT 显式指定 → 解析为绝对路径", () => {
     process.env.ARCLIGHT_PROJECTS_ROOT = "/srv/projects";
     expect(loadConfig(REPO).projectsRoot).toBe("/srv/projects");
+  });
+});
+
+describe("loadConfig ZHIPU 模型优先级（修复：持久化 model 不被 ZHIPU 默认覆盖）", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "arclight-cfg-"));
+    mkdirSync(join(dir, ".arclight"), { recursive: true });
+    delete process.env.ANTHROPIC_API_KEY; // 走 ZHIPU 分支
+    process.env.ZHIPU_API_KEY = "zhipu-test-key";
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("config.json 持久化的 model 优先于 ZHIPU 默认 glm-4.6", () => {
+    writeFileSync(join(dir, ".arclight", "config.json"), JSON.stringify({ model: "glm-4.5-air" }));
+    expect(loadConfig(dir).model).toBe("glm-4.5-air");
+  });
+
+  test("任何层都未指定 model 时回退 glm-4.6", () => {
+    expect(loadConfig(dir).model).toBe("glm-4.6");
+  });
+
+  test("ARCLIGHT_MODEL 优先于持久化与默认", () => {
+    writeFileSync(join(dir, ".arclight", "config.json"), JSON.stringify({ model: "glm-4.5-air" }));
+    process.env.ARCLIGHT_MODEL = "glm-4.5-flash";
+    expect(loadConfig(dir).model).toBe("glm-4.5-flash");
   });
 });

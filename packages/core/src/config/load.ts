@@ -43,13 +43,17 @@ export function loadConfig(repoPath: string): ArclightConfig {
   const userFile = readJsonIfExists(join(homedir(), ".config", "arclightagent", "config.json"));
   const repoFile = readJsonIfExists(join(repoPath, ".arclight", "config.json"));
   const env: Record<string, unknown> = {};
+  // 供应商缺省层：优先级最低（低于 user/repo/env config），仅在用户任何层都未指定时兜底。
+  // model 不进 env——env 是最高优先级，会盖掉 config.json 里 ProviderManager 持久化的热切换 model，
+  // 使"持久化模型"在 zhipu 部署下重启即失效。zhipu 缺省 model 改放此层（见下方 merge 顺序）。
+  const providerDefaults: Record<string, unknown> = {};
   if (process.env.ANTHROPIC_API_KEY) {
     env.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   } else if (process.env.ZHIPU_API_KEY) {
-    // 智谱 GLM 经 Anthropic 兼容端点（D4 补充）
+    // 智谱 GLM 经 Anthropic 兼容端点（D4 补充）。
     env.anthropicApiKey = process.env.ZHIPU_API_KEY;
     env.baseUrl = ZHIPU_ANTHROPIC_BASE_URL;
-    env.model = ZHIPU_DEFAULT_MODEL;
+    providerDefaults.model = ZHIPU_DEFAULT_MODEL;
   }
   if (process.env.ANTHROPIC_BASE_URL) env.baseUrl = process.env.ANTHROPIC_BASE_URL;
   if (process.env.ARCLIGHT_HOST) env.host = process.env.ARCLIGHT_HOST;
@@ -68,7 +72,9 @@ export function loadConfig(repoPath: string): ArclightConfig {
     ? resolve(process.env.ARCLIGHT_PROJECTS_ROOT)
     : resolve(repoPath, "..");
 
-  const merged = { ...userFile, ...repoFile, ...env };
+  // 优先级（低→高）：供应商缺省 < user config < repo config < env。
+  // ProviderManager 持久化到 config.json 的热切换 model 与 ARCLIGHT_MODEL 因此都能盖过 zhipu 缺省。
+  const merged = { ...providerDefaults, ...userFile, ...repoFile, ...env };
   const r = ConfigSchema.safeParse(merged);
   if (!r.success) {
     const missing = r.error.issues.map((i) => i.path.join(".")).join(", ");

@@ -5,21 +5,25 @@
 // 视觉：柔和圆角 + hairline；遮罩用普通半透明压暗——压暗降饱和是审批闸刀的专属语言，不挪用。
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   clearCreds,
   createMemory,
   deleteMemory,
-  getProviderConfig,
   listGrants,
   listMemories,
   type MemoryItem,
   type ProviderConfig,
-  patchProviderConfig,
   readOrigin,
   revokeGrant,
   updateMemory,
 } from "../../lib/arcClient";
+import {
+  applyProviderPatch,
+  getProviderConfigSnapshot,
+  refreshProviderConfig,
+  subscribeProviderConfig,
+} from "../../lib/providerConfigStore";
 import { applyTheme } from "../../lib/theme";
 
 type Tab = "general" | "provider" | "memory" | "grants";
@@ -42,8 +46,8 @@ export function SettingsModal({
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("general");
 
-  // 模型与供应商
-  const [cfg, setCfg] = useState<ProviderConfig | null>(null);
+  // 模型与供应商：读共享 store，与 Composer 的 ModelSwitcher 同步（任一处切换互相反映）。
+  const cfg = useSyncExternalStore(subscribeProviderConfig, getProviderConfigSnapshot, () => null);
   const [cfgErr, setCfgErr] = useState<string | null>(null);
   // 记忆
   const [mems, setMems] = useState<MemoryItem[]>([]);
@@ -67,11 +71,9 @@ export function SettingsModal({
 
   useEffect(() => {
     if (!open) return;
-    void (async () => {
-      const c = await getProviderConfig();
-      setCfg(c);
-      setCfgErr(c ? null : "无法读取配置（内核版本过旧或未连接）");
-    })();
+    void refreshProviderConfig().then(() => {
+      setCfgErr(getProviderConfigSnapshot() ? null : "无法读取配置（内核版本过旧或未连接）");
+    });
     void refreshMems();
     void refreshGrants();
     setNotifyPerm(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -89,12 +91,14 @@ export function SettingsModal({
 
   const applyCfg = async (patch: { model?: string; thinking?: boolean }) => {
     setBusy(true);
-    const next = await patchProviderConfig(patch).finally(() => setBusy(false));
-    if (next) {
-      setCfg(next);
-      setCfgErr(null);
-    } else {
+    try {
+      // applyProviderPatch 成功会更新共享 store → cfg 经 useSyncExternalStore 自动刷新
+      const ok = await applyProviderPatch(patch);
+      setCfgErr(ok ? null : "切换失败");
+    } catch {
       setCfgErr("切换失败");
+    } finally {
+      setBusy(false);
     }
   };
 

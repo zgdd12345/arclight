@@ -205,16 +205,23 @@ export class AgentRunner {
       }
       return true;
     } catch (e) {
-      if (e instanceof StaleEpochError) {
-        // 准入处陈旧 epoch：turn 干净置 failed（retry_allowed），不留 running 孤儿
-        this.failStaleTurn(turnId, e);
-      } else {
-        // 非 Stale 准入故障：干净置 failed（避免楔死 session）
-        this.failInternalTurn(turnId, e);
-      }
+      // failXxx 内的 db.update().run() 本身也可能抛（错误处理期间 DB 故障）——tryFailTurn 吞掉，
+      // 保证 ac.abort()+active.delete() 一定执行，否则 session 永卡 active（TURN_ACTIVE 409）。
+      this.tryFailTurn(turnId, e);
       ac.abort();
       this.active.delete(sessionId);
       return false;
+    }
+  }
+
+  /** 错误收尾：尽力把 turn 落 failed（StaleEpoch→retry_allowed，其余→internal）。
+   *  落库本身的 DB 故障在此吞掉——调用方仍须释放 active。 */
+  private tryFailTurn(turnId: string, e: unknown): void {
+    try {
+      if (e instanceof StaleEpochError) this.failStaleTurn(turnId, e);
+      else this.failInternalTurn(turnId, e);
+    } catch {
+      // 错误收尾本身失败：放弃落 failed 状态（active 由调用方释放）
     }
   }
 
@@ -246,29 +253,32 @@ export class AgentRunner {
     const slash = args.userText.trim();
     if (slash === "/undo" || slash === "/redo") {
       if (!this.admitTurn(turnId, sessionId, ac, emit, args.userText)) return;
-      const action = slash === "/undo" ? "undo" : "redo";
-      let res: { ok: boolean; message: string };
+      // admitTurn 已登记 active；其后的 emit/db.update 若抛（如 appendEvent DB 故障），
+      // 必须经 finally 收尾 ac.abort()+active.delete()，否则 session 永卡 active（TURN_ACTIVE 409）。
       try {
-        res = await this.undoRedo(sessionId, action, cwd);
-      } catch (e) {
-        res = { ok: false, message: e instanceof Error ? e.message : "undo/redo failed" };
+        const action = slash === "/undo" ? "undo" : "redo";
+        const res = await this.undoRedo(sessionId, action, cwd).catch((e) => ({
+          ok: false,
+          message: e instanceof Error ? e.message : "undo/redo failed",
+        }));
+        emit({
+          v: 1,
+          t: "message.delta",
+          sessionId,
+          turnId,
+          messageId: `m-${turnId}`,
+          role: "assistant",
+          delta: res.ok ? `✓ ${res.message}` : `✗ ${action} 失败：${res.message}`,
+        });
+        emit({ v: 1, t: "turn.completed", sessionId, turnId, status: "completed" });
+        db.update(turns)
+          .set({ status: "completed", completedAt: new Date() })
+          .where(eq(turns.id, turnId))
+          .run();
+      } finally {
+        ac.abort();
+        this.active.delete(sessionId);
       }
-      emit({
-        v: 1,
-        t: "message.delta",
-        sessionId,
-        turnId,
-        messageId: `m-${turnId}`,
-        role: "assistant",
-        delta: res.ok ? `✓ ${res.message}` : `✗ ${action} 失败：${res.message}`,
-      });
-      emit({ v: 1, t: "turn.completed", sessionId, turnId, status: "completed" });
-      db.update(turns)
-        .set({ status: "completed", completedAt: new Date() })
-        .where(eq(turns.id, turnId))
-        .run();
-      ac.abort();
-      this.active.delete(sessionId);
       return;
     }
 
@@ -276,7 +286,15 @@ export class AgentRunner {
     // 之前立即发出，客户端立刻看到 running；准入乐观锁（expectedEpoch）也在此生效。
     if (!this.admitTurn(turnId, sessionId, ac, emit, args.userText)) return;
 
-    const sc = this.getCheckpoint(sessionId, cwd);
+    // 检查点初始化（shadow-git）若抛错（git init 失败等），降级为本 turn 无检查点——绝不让它
+    // 逃出 startTurn：此刻 admitTurn 已登记 active，未保护的抛错会跳过下方 finally 的
+    // ac.abort()+active.delete()，使 session 永卡 active（TURN_ACTIVE 409）。
+    let sc: SessionCheckpoint | null = null;
+    try {
+      sc = this.getCheckpoint(sessionId, cwd);
+    } catch {
+      sc = null;
+    }
 
     // RepoMap 注入（弹性）：进 turn 前生成仓库符号图，作上下文前缀。失败/不可用静默跳过。
     const messages: LoopState["messages"] = [];

@@ -82,5 +82,6 @@ export function downloadMarkdown(content: string, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // 延迟 revoke：同步 revoke 可能在浏览器实际读取 Blob 之前撤销 URL，某些浏览器下导致下载失败。
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

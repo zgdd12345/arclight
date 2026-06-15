@@ -56,6 +56,22 @@ describe("UsageTracker", () => {
     expect(t.sessionTotals("s").costUsdMicros).toBe(0);
   });
 
+  test("model 传 thunk：record 取当前值，热切换后模型名与定价随之更新", () => {
+    let model = "glm-4.6";
+    const t = new UsageTracker(db, "zhipu", () => model);
+    t.record({ sessionId: "s", turnId: "t1", inputTokens: 1_000_000, outputTokens: 0 });
+    model = "claude-sonnet-4-5"; // 模拟 PATCH /api/config 热切换
+    t.record({ sessionId: "s", turnId: "t2", inputTokens: 1_000_000, outputTokens: 0 });
+    const rows = sqlite
+      .query<{ model: string; cost_usd_micros: number }, []>(
+        "SELECT model, cost_usd_micros FROM usage WHERE session_id='s' ORDER BY turn_id",
+      )
+      .all();
+    expect(rows.map((r) => r.model)).toEqual(["glm-4.6", "claude-sonnet-4-5"]);
+    expect(rows[0]?.cost_usd_micros).toBe(600_000); // glm-4.6 输入 0.6/1M
+    expect(rows[1]?.cost_usd_micros).toBe(3_000_000); // sonnet 输入 3.0/1M
+  });
+
   test("BUG5：cacheReadTokens/cacheWriteTokens 落库到 cache 列", () => {
     const t = new UsageTracker(db, "zhipu", "glm-4.6");
     t.record({

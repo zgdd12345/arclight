@@ -8,7 +8,7 @@
 // 机器产出 mono；删除确认用 accent-hot（hazard 红仅属 Agent 审批面，不稀释）。
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   clearCreds,
   createProject,
@@ -60,34 +60,49 @@ function SidebarRow({
   const [draft, setDraft] = useState(label);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Escape 取消标记：Escape 卸载 input 会触发 onBlur→commitRename，若不拦截会把已编辑的草稿误存。
+  const cancelRef = useRef(false);
+
+  // 重命名/删除共用收尾：setBusy 包裹 + ok/err 分支 + 网络异常兜底（不让 promise 拒绝逃逸成
+  // unhandled rejection）。idleOnError：失败时是否退出编辑态——删除失败回 idle，重命名失败留在
+  // 编辑态供修正。
+  const runMutation = async (
+    fn: () => Promise<MutationResult>,
+    failMsg: string,
+    idleOnError: boolean,
+  ) => {
+    setBusy(true);
+    try {
+      const r = await fn();
+      if (r.ok) {
+        setErr(null);
+        setState("idle");
+      } else {
+        setErr(r.message ?? failMsg);
+        if (idleOnError) setState("idle");
+      }
+    } catch {
+      setErr(`${failMsg}（网络异常）`);
+      if (idleOnError) setState("idle");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const commitRename = async () => {
+    if (cancelRef.current) {
+      cancelRef.current = false; // Escape 取消：跳过本次（blur 触发的）提交
+      return;
+    }
     const name = draft.trim();
     if (!name || name === label) {
       setState("idle");
       return;
     }
-    setBusy(true);
-    const r = await onRename(name).finally(() => setBusy(false));
-    if (r.ok) {
-      setErr(null);
-      setState("idle");
-    } else {
-      setErr(r.message ?? "重命名失败");
-    }
+    await runMutation(() => onRename(name), "重命名失败", false);
   };
 
-  const commitDelete = async () => {
-    setBusy(true);
-    const r = await onDelete().finally(() => setBusy(false));
-    if (r.ok) {
-      setErr(null);
-      setState("idle");
-    } else {
-      setErr(r.message ?? "删除失败");
-      setState("idle");
-    }
-  };
+  const commitDelete = () => runMutation(onDelete, "删除失败", true);
 
   if (state === "renaming") {
     return (
@@ -100,7 +115,10 @@ function SidebarRow({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void commitRename();
-            if (e.key === "Escape") setState("idle");
+            if (e.key === "Escape") {
+              cancelRef.current = true; // 标记取消，拦下随后 onBlur 触发的提交
+              setState("idle");
+            }
           }}
           onBlur={() => void commitRename()}
           spellCheck={false}
@@ -154,6 +172,7 @@ function SidebarRow({
         <button
           type="button"
           onClick={() => {
+            cancelRef.current = false; // 进入编辑前清取消标记
             setDraft(label);
             setState("renaming");
           }}
@@ -281,7 +300,7 @@ export function ProjectSidebar({
         reconnect();
         return;
       }
-      setSidebarError("无法加载项目，检查连接/令牌");
+      setSidebarError("无法加载会话，检查连接/令牌");
     }
   }, [activeWs, reconnect]);
 
