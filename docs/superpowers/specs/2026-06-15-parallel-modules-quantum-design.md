@@ -177,6 +177,68 @@ export interface ToolSource {
 - cqlib：无本地模拟器 ❌ → 本地关卡需交叉模拟或联网（适配器须标注）。
 - Kaiwu：经典退火解可本地，CIM 真机需 license/token。
 
+### 6.5 量子算法库（知识层，严格遵循渐进披露）
+
+定位：按 A 路线（集成不自建），算法库**不是**与 isQ/Qiskit 竞争的数值库，而是 arclight 内部的
+"算法资产库"，架在四框架之上，作为动态 workflow 的**知识层**——被基座 workflow 的"①Intake 选型"
+和"③实现"两步按需消费。它与 §6 三层正交互补：workflow 管"怎么走"，适配器管"某框架怎么写"，
+算法库管"有哪些算法、怎么算对、各语言怎么写"。
+
+**目录结构**——每个算法 = 框架无关规范 + 校验 oracle + 按语言的已验证样例：
+
+```
+algorithms/
+├─ gate-circuit/                    # 门电路范式 (isQ/PyQuafu/cqlib/WuYueSDK/…)
+│  ├─ INDEX.md                      # 范式内一行式索引(含语言覆盖标记)
+│  ├─ grover/
+│  │  ├─ spec.md                    # 框架无关:用途/选型条件/资源量级(qubits·depth)/nisq
+│  │  ├─ oracle.md                  # 已知答案校验:2-qubit 搜 |11⟩ → 目标态概率>阈值
+│  │  └─ samples/                   # 按语言样例,逐步完善,不要求全覆盖,文件名钉死版本
+│  │     ├─ isq@0.2.8.isq    ✓
+│  │     ├─ pyquafu@0.4.5.py ✓
+│  │     ├─ qiskit@2.1.py    ✓
+│  │     └─ (cqlib 暂缺)
+│  ├─ vqe/  qaoa/  qft/  bell/  …
+└─ annealing/                       # 退火范式 (玻色 Kaiwu, QUBO/Ising)
+   ├─ INDEX.md
+   ├─ maxcut/  tsp/  knapsack/
+   │  ├─ spec.md                    # QUBO 建模规范
+   │  ├─ oracle.md                  # 小规模已知最优解
+   │  └─ samples/kaiwu@1.3.1.py …
+```
+
+**渐进披露的层映射**（核心：选型只读极薄索引，绝不读遍全部 spec）：
+
+| 披露层 | 加载时机 | 内容 |
+|---|---|---|
+| L1 Discovery | 量子 skill frontmatter（已有） | name/description，agent 判断是否激活 |
+| L2 Activation | skill 激活时常驻（必须小、有界） | **顶层索引**：范式列表 + 指针，不含算法细节 |
+| L3-a 范式索引 | ①分类出范式后才加载 | `gate-circuit/INDEX.md` 或 `annealing/INDEX.md`：每算法一行 |
+| L3-b 算法规范 | 选定某算法才加载 | 该算法 `spec.md` 全文 |
+| L3-c 实现样例 + 校验 | 在某语言实现/验证时才加载 | `samples/<lang@ver>` **单一一份** + `oracle.md` |
+
+**索引分片**是关键：先按范式收窄，再加载对应范式的一行式索引，最后才拉单个算法的 spec 全文。
+这样**无论算法库长到多大，常驻上下文都有界**。agent 用哪个语言只读哪份样例（如写 isQ 只读 `isq@*.isq`），
+其他语言样例绝不进上下文。
+
+**索引行声明语言覆盖**，避免 agent 去读不存在的样例：
+
+```
+grover | 无结构搜索 | 5-50q | O(√N) | samples: isq,pyquafu,qiskit   (缺 cqlib)
+```
+
+**目标语言样例缺失时的 fallback**：读一份已有语言样例（通用模型最熟的，如 Qiskit）+ 目标语言适配器
+→ 翻译/合成出目标语言代码 → 跑 `oracle.md` 校验 → **通过后回写为新样例**。这就是"逐步完善"的自动化路径：
+缺口被真实任务一次次补上，每份新样例都经过校验。
+
+**两条入库纪律**（对小众框架尤其要命）：
+
+1. **校验通过 + 版本钉死才入库**：样例文件名带框架版本（`isq@0.2.8.isq`），框架升版即标记复核。
+   一份没校验、用了废弃 API 的样例会把通用模型**教偏**（调研实证：isQ 两套方言、cqlib 两年 16 版本、API churn 高）。
+2. **手工策展样例（权威种子）与 agent 合成样例（自动填缝）互补**：两者都进 `samples/`，同受上述纪律约束，索引统一登记覆盖。
+
+**`contribute()` 只注入 L2 顶层索引指针**，绝不把范式索引或 spec 灌进系统提示；所有算法条目由 agent 用文件/Skill 工具按需拉取。
+
 ## 7. v1 量子交付范围（首个适配器：isQ）
 
 按用户决定，门电路三件套里 **v1 先落地 isQ**：
@@ -185,7 +247,9 @@ export interface ToolSource {
 - 配 isQ 的 sandbox profile（`isqc` + 本地 QIR 模拟器）。
 - isQ 风险点写进适配器：版本管理混乱（GitHub 仅 v0.0.1 / 文档 0.2.8、2023 后低活跃）、两套方言不兼容、
   CNOT 写法非主流（`ctrl X(c,t)`）、社区极小 → 通用模型幻觉率高 → **钉死版本 + BANNED_PATTERNS + 可执行校验脚本是必需品**。
-- 用现有 GLM 跑通端到端：写 Bell/GHZ/Grover → 本地 QIR 模拟 → 已知答案校验过关。
+- 算法库（§6.5）种子条目：为 Bell/GHZ/Grover 建 `spec.md` + `oracle.md`，并提供 `samples/isq@<ver>.isq` 作为首批样例；
+  `gate-circuit/INDEX.md` 登记覆盖（仅 isq）。其余语言样例按 fallback 路径后续填补。
+- 用现有 GLM 跑通端到端：选型查索引 → 读 isQ 样例为参考 → 写 isQ 代码 → 本地 QIR 模拟 → 已知答案校验过关。
 
 ## 8. 实施顺序
 
@@ -215,4 +279,6 @@ export interface ToolSource {
 - skills：发现逻辑、`contribute()` 提示词注入、`Skill` 工具加载；动态合成的 happy/无匹配路径。
 - 量子（v1 isQ）：基座关卡（`GATE_N` 输出义务）；isQ 本地 QIR 模拟跑 Bell/GHZ/BV/DJ 等已知答案校验；
   BANNED_PATTERNS 自检脚本；真机执行默认锁定且需显式放行的回归测试。
+- 算法库（§6.5）：索引覆盖标记与实际 `samples/` 一致性校验；样例版本钉死回归；
+  目标语言缺失时 fallback（合成→oracle 校验→回写）的 happy/失败路径；`contribute()` 只注入 L2 指针的断言。
 ```
