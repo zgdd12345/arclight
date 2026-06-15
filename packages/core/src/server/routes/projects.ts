@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { type Dirent, existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Db } from "../../db/client";
-import { sessions, workspaces } from "../../db/schema";
+import { sessions, turns, workspaces } from "../../db/schema";
 
 // 项目（= workspace）管理。安全围栏：所有项目目录必须位于 projectsRoot 之内
 // （默认 = --repo 的父目录）。浏览器只能在根下选/建子目录，开不了任意宿主路径。
@@ -112,6 +112,51 @@ export function createProjectsRoute(deps: { db: Db; projectsRoot: string; arclig
           .values({ id, name: basename(abs), repoPath: abs, arclightDir })
           .run();
         return c.json({ ok: true, workspaceId: id, repoPath: abs, name: basename(abs) }, 201);
+      })
+      // 重命名项目（仅显示名，repoPath 不变——磁盘目录不动）
+      .patch("/:workspaceId", async (c) => {
+        const wsId = c.req.param("workspaceId");
+        const body = (await c.req.json().catch(() => ({}))) as { name?: string };
+        const name = (body.name ?? "").trim().slice(0, 60);
+        if (!name) return c.json({ ok: false, code: "VALIDATION", message: "name required" }, 400);
+        const row = db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.id, wsId))
+          .get();
+        if (!row) return c.json({ ok: false, code: "NOT_FOUND" }, 404);
+        db.update(workspaces).set({ name }).where(eq(workspaces.id, wsId)).run();
+        return c.json({ ok: true });
+      })
+      // 删除项目 = 注销 workspace + FK 级联清除其全部会话记录；磁盘文件一律不动。
+      // 任一会话有活跃 turn → 409 拒绝（fail-closed）。
+      .delete("/:workspaceId", (c) => {
+        const wsId = c.req.param("workspaceId");
+        const row = db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.id, wsId))
+          .get();
+        if (!row) return c.json({ ok: false, code: "NOT_FOUND" }, 404);
+        const active = db
+          .select({ id: turns.id })
+          .from(turns)
+          .innerJoin(sessions, eq(turns.sessionId, sessions.id))
+          .where(
+            and(
+              eq(sessions.workspaceId, wsId),
+              inArray(turns.status, ["queued", "running", "awaiting_approval"]),
+            ),
+          )
+          .get();
+        if (active) {
+          return c.json(
+            { ok: false, code: "TURN_ACTIVE", message: "项目内有会话正在运行，先停止再删除" },
+            409,
+          );
+        }
+        db.delete(workspaces).where(eq(workspaces.id, wsId)).run();
+        return c.json({ ok: true });
       })
       // 某项目下的会话历史（恢复用）
       .get("/:workspaceId/sessions", (c) => {

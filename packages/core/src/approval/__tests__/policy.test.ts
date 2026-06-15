@@ -150,6 +150,33 @@ describe("ApprovalPolicy session 白名单（scope=session）", () => {
     }
   });
 
+  test("listGrants / revokeGrant：本会话授权可见可撤销，撤销后同工具重新弹审批", async () => {
+    const { dir, db, sqlite, policy } = setup();
+    try {
+      // 无授权时空数组
+      expect(policy.listGrants("s1")).toEqual([]);
+
+      // 本会话允许 bash → 出现在 listGrants
+      await checkAndApprove(policy, db, "tc1", "session");
+      expect(policy.listGrants("s1")).toEqual(["bash"]);
+
+      // 撤销不存在的授权 → false；撤销 bash → true
+      expect(policy.revokeGrant("s1", "nonexistent")).toBe(false);
+      expect(policy.revokeGrant("s1", "bash")).toBe(true);
+      expect(policy.listGrants("s1")).toEqual([]);
+
+      // 撤销后同工具再调用应重新弹审批（新增 pending 行）
+      const before = db.select({ id: approvalsTbl.id }).from(approvalsTbl).all().length;
+      const again = await checkAndApprove(policy, db, "tc2", "once");
+      const after = db.select({ id: approvalsTbl.id }).from(approvalsTbl).all().length;
+      expect(again.decision).toBe("allow");
+      expect(after).toBe(before + 1); // 撤销生效 = 又弹了
+    } finally {
+      sqlite.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("高危（risk=high）scope=session 不被记住：同工具下次仍弹审批（防客户端伪造 scope 提权）", async () => {
     const { dir, db, sqlite } = setup();
     // dangerFullAccess 让 admin_only 走 ask 路径（risk=high），从而能测「记住」是否被服务端拒收

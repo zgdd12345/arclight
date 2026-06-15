@@ -5,6 +5,7 @@ import type { ArcEvent } from "@arclight/protocol";
 // seq <= maxSeq 丢弃；未知 t 静默忽略（forward-compat）。
 
 export type TextPart = { type: "text"; text: string };
+export type ThinkingPart = { type: "thinking"; text: string };
 export type ToolPart = {
   type: "tool";
   callId: string;
@@ -17,7 +18,7 @@ export type ToolPart = {
   spillRef?: string;
   progress: string; // stdout/stderr 合流 preview（slice2 起分流）
 };
-export type MsgPart = TextPart | ToolPart;
+export type MsgPart = TextPart | ThinkingPart | ToolPart;
 export type ThreadMsg = { id: string; role: "user" | "assistant"; parts: MsgPart[] };
 
 export type PendingApproval = {
@@ -83,6 +84,45 @@ export function reduce(state: SessionState, ev: WireEvent): SessionState {
         last?.type === "text"
           ? [...msg.parts.slice(0, -1), { type: "text", text: last.text + e.delta } as TextPart]
           : [...msg.parts, { type: "text", text: e.delta } as TextPart];
+      return { ...base, messages: replaceAt(base.messages, idx, { ...msg, parts }) };
+    }
+
+    case "user.message": {
+      // 用户输入回显（问答 transcript 的"问"）：整条落一个 user 消息。
+      const e = ev as Extract<ArcEvent, { t: "user.message" }>;
+      if (base.messages.some((m) => m.id === e.messageId)) return base; // replay 宽容
+      return {
+        ...base,
+        messages: [
+          ...base.messages,
+          { id: e.messageId, role: "user", parts: [{ type: "text", text: e.text }] },
+        ],
+      };
+    }
+
+    case "thinking.delta": {
+      // 与 message.delta 同构：按 messageId 定位消息；尾部 thinking part 续接，
+      // 否则开新 thinking part（thinking→text→thinking 交错时保持声道分段）。
+      const e = ev as Extract<ArcEvent, { t: "thinking.delta" }>;
+      const idx = base.messages.findIndex((m) => m.id === e.messageId);
+      if (idx === -1) {
+        return {
+          ...base,
+          messages: [
+            ...base.messages,
+            { id: e.messageId, role: "assistant", parts: [{ type: "thinking", text: e.delta }] },
+          ],
+        };
+      }
+      const msg = base.messages[idx] as ThreadMsg;
+      const last = msg.parts.at(-1);
+      const parts =
+        last?.type === "thinking"
+          ? [
+              ...msg.parts.slice(0, -1),
+              { type: "thinking", text: last.text + e.delta } as ThinkingPart,
+            ]
+          : [...msg.parts, { type: "thinking", text: e.delta } as ThinkingPart];
       return { ...base, messages: replaceAt(base.messages, idx, { ...msg, parts }) };
     }
 

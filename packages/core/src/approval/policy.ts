@@ -9,7 +9,7 @@ import { previewJson } from "../util/text";
 import { classify } from "./presets";
 import { ApprovalService } from "./service";
 
-export type AuditKind = "blacklist.hit" | "approval.asked" | "tool.denied";
+export type AuditKind = "blacklist.hit" | "approval.asked" | "tool.denied" | "approval.revoked";
 export type AuditFn = (
   kind: AuditKind,
   detail: Record<string, unknown>,
@@ -216,6 +216,20 @@ export class ApprovalPolicy implements ApprovalSeam {
   decide(askId: string, decision: "allow" | "deny", scope: "once" | "session" = "once"): string {
     if (decision === "allow" && scope === "session") this.rememberToolForSession(askId);
     return this.service.decide(askId, decision);
+  }
+
+  /** 列出本会话已「本会话允许」的工具名（审批白名单可见性）。无授权则空数组。 */
+  listGrants(sessionId: string): string[] {
+    return [...(this.sessionAllow.get(sessionId) ?? [])].sort();
+  }
+
+  /** 撤销本会话对某工具的「本会话允许」。命中返回 true；该工具后续调用将重新弹审批。 */
+  revokeGrant(sessionId: string, toolName: string): boolean {
+    const set = this.sessionAllow.get(sessionId);
+    if (!set?.delete(toolName)) return false;
+    if (set.size === 0) this.sessionAllow.delete(sessionId);
+    this.audit?.("approval.revoked", { tool: toolName }, sessionId);
+    return true;
   }
 
   /** 由 askId 反查 (sessionId, 工具名)，记入本会话白名单。行缺失则静默跳过（决议本身仍照常）。

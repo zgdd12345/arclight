@@ -46,6 +46,7 @@ export const sessions = sqliteTable(
     epoch: integer("epoch").notNull().default(0), // 乐观锁 + 压缩边界
     nextSeq: integer("next_seq").notNull().default(1), // per-session event seq
     summary: text("summary"), // P0 单级压缩摘要
+    contextTokens: integer("context_tokens").notNull().default(0), // 上次 turn 结束时的上下文 token 估计（余量仪表）
     contextSnapshot: text("context_snapshot", { mode: "json" }).$type<Record<string, unknown>>(),
     lastResponseId: text("last_response_id"),
     lastEventSeq: integer("last_event_seq").notNull().default(0),
@@ -282,4 +283,19 @@ export const secretsMetadata = sqliteTable(
     uniqueIndex("secrets_tenant_name_uq").on(t.tenantId, t.name),
     index("secrets_kind_idx").on(t.kind),
   ],
+);
+
+// 用户记忆（仿 ChatGPT Memory）：跨会话长期偏好/事实，启用项在每 turn 注入上下文前缀。
+// 阶段一单租户单用户；enabled=false 为停用（保留不注入）。
+export const memories = sqliteTable(
+  "memories",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default("local"),
+    content: text("content").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  (t) => [index("memories_enabled_idx").on(t.enabled)],
 );

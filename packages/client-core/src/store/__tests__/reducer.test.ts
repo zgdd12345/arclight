@@ -243,3 +243,49 @@ describe("SessionReducer 事件语义", () => {
     expect(s.lastError).toBe("provider exhausted retries");
   });
 });
+
+describe("thinking.delta（思考过程声道）", () => {
+  const think = (messageId: string, text: string, seq?: number) =>
+    ev("thinking.delta", { messageId, delta: text, turnId: "t1" }, seq);
+
+  it("无对应消息时新建 assistant 消息，首 part 为 thinking", () => {
+    seqCounter = 0;
+    const s = reduce(initialState("s1"), think("m1", "先看 repo 结构"));
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0]?.parts).toEqual([{ type: "thinking", text: "先看 repo 结构" }]);
+  });
+
+  it("尾部 thinking part 续接；text part 出现后新 thinking 开新段（声道分段）", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), think("m1", "步骤一"));
+    s = reduce(s, think("m1", "，步骤二"));
+    expect(s.messages[0]?.parts).toEqual([{ type: "thinking", text: "步骤一，步骤二" }]);
+    s = reduce(s, delta("m1", "答案正文"));
+    s = reduce(s, think("m1", "继续推理"));
+    expect(s.messages[0]?.parts).toEqual([
+      { type: "thinking", text: "步骤一，步骤二" },
+      { type: "text", text: "答案正文" },
+      { type: "thinking", text: "继续推理" },
+    ]);
+  });
+
+  it("thinking 在前、delta 在后：同 messageId 落同一消息，text 追加为新 part", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), think("m1", "推理…"));
+    s = reduce(s, delta("m1", "你好"));
+    expect(s.messages).toHaveLength(1);
+    const parts = s.messages[0]?.parts ?? [];
+    expect(parts[0]).toEqual({ type: "thinking", text: "推理…" });
+    expect(parts[1]).toEqual({ type: "text", text: "你好" });
+  });
+
+  it("part 级不可变更新：thinking 续接只替换尾 part 引用，前序 part 共享", () => {
+    seqCounter = 0;
+    let s = reduce(initialState("s1"), delta("m1", "正文"));
+    s = reduce(s, think("m1", "a"));
+    const beforeText = s.messages[0]?.parts[0];
+    const s2 = reduce(s, think("m1", "b"));
+    expect(s2.messages[0]?.parts[0]).toBe(beforeText);
+    expect(s2.messages[0]?.parts[1]).toEqual({ type: "thinking", text: "ab" });
+  });
+});

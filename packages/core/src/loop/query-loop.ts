@@ -18,6 +18,7 @@ import type {
 // slice2 范围：happy-path + 中断 + 错误恢复 + 审批接缝（完整状态机=U4；压缩/钩子面=U6）。
 
 const TEXT_FLUSH_CHARS = 800; // 流式合批阈值（内核侧粗粒度；前端另有 16ms 合批）
+const THINK_FLUSH_CHARS = 200; // thinking 流更细粒度：思考过程是"实时仪表读数"，延迟感知敏感
 
 export async function* queryLoop(
   st: LoopState,
@@ -54,20 +55,38 @@ export async function* queryLoop(
     const messageId = `m-${st.turnId}-${round}-r${retries}`;
     const gen = deps.callProvider(st.messages, deps.registry.schemas(), signal);
     let textBuf = "";
+    let thinkBuf = "";
     let r = await gen.next();
     while (!r.done) {
       const part = r.value;
       if (part.type === "text-delta") {
+        // 声道切换先冲对侧缓冲：seq 顺序必须忠实于模型产出顺序（thinking → text 交错安全）
+        if (thinkBuf.length > 0) {
+          yield emit({ ...base, t: "thinking.delta", messageId, delta: thinkBuf });
+          thinkBuf = "";
+        }
         textBuf += part.text;
         if (textBuf.length >= TEXT_FLUSH_CHARS) {
           yield emit({ ...base, t: "message.delta", messageId, role: "assistant", delta: textBuf });
           textBuf = "";
         }
+      } else if (part.type === "reasoning-delta") {
+        if (textBuf.length > 0) {
+          yield emit({ ...base, t: "message.delta", messageId, role: "assistant", delta: textBuf });
+          textBuf = "";
+        }
+        thinkBuf += part.text;
+        if (thinkBuf.length >= THINK_FLUSH_CHARS) {
+          yield emit({ ...base, t: "thinking.delta", messageId, delta: thinkBuf });
+          thinkBuf = "";
+        }
       }
-      // reasoning-delta：阶段一不外发（events 协议未定义 reasoning 帧，U6 再议）
       r = await gen.next();
     }
     const res = r.value;
+    if (thinkBuf.length > 0) {
+      yield emit({ ...base, t: "thinking.delta", messageId, delta: thinkBuf });
+    }
     if (textBuf.length > 0) {
       yield emit({ ...base, t: "message.delta", messageId, role: "assistant", delta: textBuf });
     }

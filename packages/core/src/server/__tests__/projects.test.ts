@@ -156,3 +156,150 @@ describe("项目路由（HTTP）", () => {
     expect(sessions.some((s) => s.id === sessionId && s.title === "测试会话")).toBe(true);
   });
 });
+
+describe("会话/项目 增删改（CRUD 补全）", () => {
+  let root: string;
+  let app: ReturnType<typeof createApp>;
+  let sqlite: ReturnType<typeof createDb>["sqlite"];
+  let wsId: string;
+  let sessId: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), "arclight-crud-"));
+    mkdirSync(join(root, "proj-a"));
+    const dir = join(root, "proj-a");
+    const arclightDir = join(dir, ".arclight");
+    const { dbPath } = runMigrations(arclightDir);
+    const conn = createDb(dbPath);
+    sqlite = conn.sqlite;
+    app = createApp({
+      repoPath: dir,
+      arclightDir,
+      db: conn.db,
+      bus: new EventBus(),
+      token: "t",
+      devNoAuth: true,
+      projectsRoot: root,
+    });
+    const reg = await app.fetch(
+      new Request("http://x/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "proj-a" }),
+      }),
+    );
+    wsId = ((await reg.json()) as { workspaceId: string }).workspaceId;
+    const sess = await app.fetch(
+      new Request("http://x/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: wsId }),
+      }),
+    );
+    sessId = ((await sess.json()) as { sessionId: string }).sessionId;
+  });
+  afterEach(() => {
+    sqlite.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const json = (method: string, path: string, body?: unknown) =>
+    app.fetch(
+      new Request(`http://x${path}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      }),
+    );
+
+  test("PATCH /api/sessions/:id 重命名并反映在历史列表", async () => {
+    const res = await json("PATCH", `/api/sessions/${sessId}`, { title: "重命名后的会话" });
+    expect(res.status).toBe(200);
+    const hist = await json("GET", `/api/projects/${wsId}/sessions`);
+    const { sessions } = (await hist.json()) as { sessions: { id: string; title: string }[] };
+    expect(sessions.find((s) => s.id === sessId)?.title).toBe("重命名后的会话");
+  });
+
+  test("PATCH 空标题 400；不存在的会话 404", async () => {
+    expect((await json("PATCH", `/api/sessions/${sessId}`, { title: "  " })).status).toBe(400);
+    expect((await json("PATCH", "/api/sessions/nope", { title: "x" })).status).toBe(404);
+  });
+
+  test("DELETE /api/sessions/:id 删除并从历史消失；重复删除 404", async () => {
+    expect((await json("DELETE", `/api/sessions/${sessId}`)).status).toBe(200);
+    const hist = await json("GET", `/api/projects/${wsId}/sessions`);
+    const { sessions } = (await hist.json()) as { sessions: { id: string }[] };
+    expect(sessions.some((s) => s.id === sessId)).toBe(false);
+    expect((await json("DELETE", `/api/sessions/${sessId}`)).status).toBe(404);
+  });
+
+  test("DELETE 活跃 turn（running）→ 409 fail-closed", async () => {
+    sqlite.run(
+      "INSERT INTO turns (id, session_id, command_id, status, input) VALUES (?, ?, ?, 'running', '{}')",
+      ["t-act", sessId, "c-act"],
+    );
+    const res = await json("DELETE", `/api/sessions/${sessId}`);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("TURN_ACTIVE");
+  });
+
+  test("PATCH /api/projects/:id 重命名（repoPath 不变）", async () => {
+    expect((await json("PATCH", `/api/projects/${wsId}`, { name: "新项目名" })).status).toBe(200);
+    const list = await json("GET", "/api/projects");
+    const { projects } = (await list.json()) as {
+      projects: { workspaceId: string; name: string; repoPath: string }[];
+    };
+    const p = projects.find((x) => x.workspaceId === wsId);
+    expect(p?.name).toBe("新项目名");
+    expect(p?.repoPath).toBe(join(root, "proj-a")); // 磁盘路径不动
+  });
+
+  test("DELETE /api/projects/:id 注销 + 级联清会话；磁盘目录保留", async () => {
+    expect((await json("DELETE", `/api/projects/${wsId}`)).status).toBe(200);
+    const list = await json("GET", "/api/projects");
+    const { projects } = (await list.json()) as { projects: { workspaceId: string }[] };
+    expect(projects.some((p) => p.workspaceId === wsId)).toBe(false);
+    // 级联：其会话一并清除
+    expect((await json("GET", `/api/sessions/${sessId}`)).status).toBe(404);
+    // 磁盘文件一律不动
+    expect(existsSync(join(root, "proj-a"))).toBe(true);
+  });
+
+  test("DELETE 项目内有活跃 turn → 409", async () => {
+    sqlite.run(
+      "INSERT INTO turns (id, session_id, command_id, status, input) VALUES (?, ?, ?, 'awaiting_approval', '{}')",
+      ["t-act2", sessId, "c-act2"],
+    );
+    expect((await json("DELETE", `/api/projects/${wsId}`)).status).toBe(409);
+  });
+
+  test("submit 自动标题：title 为空时取首条提问前 40 字", async () => {
+    const res = await json("POST", "/api/commands", {
+      k: "submit",
+      v: 1,
+      commandId: "cmd-title-1",
+      sessionId: sessId,
+      input: {
+        text: "帮我重构这个超长的函数名字测试标题截断".repeat(3),
+        agent: "code",
+        baseEpoch: 0,
+      },
+    });
+    expect(res.status).toBe(202);
+    const hist = await json("GET", `/api/projects/${wsId}/sessions`);
+    const { sessions } = (await hist.json()) as { sessions: { id: string; title: string }[] };
+    const title = sessions.find((s) => s.id === sessId)?.title ?? "";
+    expect(title.length).toBeLessThanOrEqual(40);
+    expect(title.startsWith("帮我重构")).toBe(true);
+    // runMockTurn 系 fire-and-forget：等其终态再收尾，防 afterEach 关库后异步写库泄漏
+    const { turnId } = (await res.json()) as { turnId: string };
+    for (let i = 0; i < 200; i++) {
+      const row = sqlite
+        .query<{ status: string }, [string]>("SELECT status FROM turns WHERE id = ?")
+        .get(turnId);
+      if (row && row.status !== "queued" && row.status !== "running") break;
+      await Bun.sleep(10);
+    }
+  });
+});

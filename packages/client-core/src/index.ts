@@ -9,6 +9,7 @@ export {
   reduceBatch,
   type SessionState,
   type TextPart,
+  type ThinkingPart,
   type ThreadMsg,
   type ToolPart,
   type TurnStatus,

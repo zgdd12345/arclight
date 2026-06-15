@@ -6,10 +6,10 @@ import { UndoRedoController } from "../coding/checkpoint/undo-redo";
 import { RepoMap } from "../coding/repomap/index";
 import { appendEvent, StaleEpochError } from "../db/appendEvent";
 import type { Db } from "../db/client";
-import { events, sessions, turns, workspaces } from "../db/schema";
+import { events, memories, sessions, turns, workspaces } from "../db/schema";
 import type { EventBus } from "../events/bus";
 import type { ToolRegistry } from "../tools/registry";
-import { type CompactResult, compact, shouldCompact } from "./compaction";
+import { type CompactResult, compact, estimateTokens, shouldCompact } from "./compaction";
 import { queryLoop } from "./query-loop";
 import type { ApprovalSeam, CallProvider, LoopDeps, LoopState } from "./types";
 
@@ -147,6 +147,26 @@ export class AgentRunner {
       .run();
   }
 
+  /** 非 Stale 的内部故障收口：turn 干净置 failed（retry_allowed=false）。准入处与 startTurn
+   *  catch 共用——绝不向 fire-and-forget 的 void 重抛，避免楔死 session（isActive 恒真）。 */
+  private failInternalTurn(turnId: string, e: unknown): void {
+    this.deps.db
+      .update(turns)
+      .set({
+        status: "failed",
+        error: {
+          status: "error",
+          tool: "runner",
+          error_class: "INTERNAL",
+          user_message: e instanceof Error ? e.message.slice(0, 200) : "internal error",
+          retry_allowed: false,
+        },
+        completedAt: new Date(),
+      })
+      .where(eq(turns.id, turnId))
+      .run();
+  }
+
   /** turn 准入（/undo/redo 与正常分支共用，消除重复）：置 running + 发 turn.started
    *  （首个 append 带 expectedEpoch 乐观锁）。返回 false 表示准入失败——已干净置 failed
    *  并 abort+清 active，调用方须立即 return。
@@ -162,6 +182,7 @@ export class AgentRunner {
     sessionId: string,
     ac: AbortController,
     emit: (draft: Parameters<typeof appendEvent>[1]) => ArcEvent,
+    userText?: string,
   ): boolean {
     this.deps.db
       .update(turns)
@@ -170,28 +191,26 @@ export class AgentRunner {
       .run();
     try {
       emit({ v: 1, t: "turn.started", sessionId, turnId });
+      // 问答回显：用户输入紧随 turn.started 落事件流（持久化 + replay），
+      // transcript 的"问"不再依赖客户端乐观消息（刷新即丢）。
+      if (userText !== undefined) {
+        emit({
+          v: 1,
+          t: "user.message",
+          sessionId,
+          turnId,
+          messageId: `u-${turnId}`,
+          text: userText,
+        });
+      }
       return true;
     } catch (e) {
       if (e instanceof StaleEpochError) {
         // 准入处陈旧 epoch：turn 干净置 failed（retry_allowed），不留 running 孤儿
         this.failStaleTurn(turnId, e);
       } else {
-        // 非 Stale 准入故障：与外层 catch 一致地干净置 failed（避免楔死 session）
-        this.deps.db
-          .update(turns)
-          .set({
-            status: "failed",
-            error: {
-              status: "error",
-              tool: "runner",
-              error_class: "INTERNAL",
-              user_message: e instanceof Error ? e.message.slice(0, 200) : "internal error",
-              retry_allowed: false,
-            },
-            completedAt: new Date(),
-          })
-          .where(eq(turns.id, turnId))
-          .run();
+        // 非 Stale 准入故障：干净置 failed（避免楔死 session）
+        this.failInternalTurn(turnId, e);
       }
       ac.abort();
       this.active.delete(sessionId);
@@ -226,7 +245,7 @@ export class AgentRunner {
     // /undo /redo：拦截特殊指令，不进 provider 循环（DEV_PLAN §2.3 ③）
     const slash = args.userText.trim();
     if (slash === "/undo" || slash === "/redo") {
-      if (!this.admitTurn(turnId, sessionId, ac, emit)) return;
+      if (!this.admitTurn(turnId, sessionId, ac, emit, args.userText)) return;
       const action = slash === "/undo" ? "undo" : "redo";
       let res: { ok: boolean; message: string };
       try {
@@ -255,7 +274,7 @@ export class AgentRunner {
 
     // 受理即反馈：turn.started 在慢准备（checkpoint/RepoMap 冷加载首 turn 可达数十秒）
     // 之前立即发出，客户端立刻看到 running；准入乐观锁（expectedEpoch）也在此生效。
-    if (!this.admitTurn(turnId, sessionId, ac, emit)) return;
+    if (!this.admitTurn(turnId, sessionId, ac, emit, args.userText)) return;
 
     const sc = this.getCheckpoint(sessionId, cwd);
 
@@ -269,6 +288,23 @@ export class AgentRunner {
           content: `[Repository context — most relevant symbols by reference graph]\n${mapText}`,
         });
       }
+    }
+    // 用户记忆注入（仿 ChatGPT Memory）：启用项作为上下文前缀，跨会话长期生效。
+    // 弹性：查询失败静默跳过（记忆是增强不是依赖，旧库未迁移时不阻断 turn）。
+    try {
+      const mems = db
+        .select({ content: memories.content })
+        .from(memories)
+        .where(eq(memories.enabled, true))
+        .all();
+      if (mems.length > 0) {
+        messages.push({
+          role: "user",
+          content: `[用户记忆 — 长期偏好与事实，回答与做事时遵循]\n${mems.map((m) => `- ${m.content}`).join("\n")}`,
+        });
+      }
+    } catch {
+      // memories 表不可用：跳过注入
     }
     messages.push({ role: "user", content: args.userText });
 
@@ -392,22 +428,20 @@ export class AgentRunner {
         this.failStaleTurn(turnId, e);
       } else {
         // loop 契约上不 throw；此处为最后防线（如 appendEvent DB 故障）
-        db.update(turns)
-          .set({
-            status: "failed",
-            error: {
-              status: "error",
-              tool: "runner",
-              error_class: "INTERNAL",
-              user_message: e instanceof Error ? e.message.slice(0, 200) : "internal error",
-              retry_allowed: false,
-            },
-            completedAt: new Date(),
-          })
-          .where(eq(turns.id, turnId))
-          .run();
+        this.failInternalTurn(turnId, e);
       }
     } finally {
+      // 上下文余量仪表：无论成功/失败/中断都记一次最终上下文 token（state.messages 即最终上下文，
+      // 含 RepoMap/记忆/摘要/工具回灌；压缩 splice 后也正确）。放 finally 保证压缩后 DB 异常也不留陈旧值。
+      // 与 shouldCompact 同口径（@anthropic-ai/tokenizer 估计）。session 行不存在时 update 为 no-op。
+      try {
+        db.update(sessions)
+          .set({ contextTokens: estimateTokens(state.messages) })
+          .where(eq(sessions.id, sessionId))
+          .run();
+      } catch {
+        // 估算/写库失败不影响 turn 收尾
+      }
       ac.abort(); // 清理在途（沙箱 run / provider 流）
       this.active.delete(sessionId);
     }

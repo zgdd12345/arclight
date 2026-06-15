@@ -38,6 +38,23 @@ export class HttpClient {
     return { status: res.status, body: (await res.json()) as T };
   }
 
+  async patchJson<T>(path: string, body: unknown): Promise<{ status: number; body: T }> {
+    const res = await this.fetchImpl(this.url(path), {
+      method: "PATCH",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as T };
+  }
+
+  async deleteJson<T>(path: string): Promise<{ status: number; body: T }> {
+    const res = await this.fetchImpl(this.url(path), {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    return { status: res.status, body: (await res.json()) as T };
+  }
+
   /** SSE 用：返回原始 Response（调用方解析流与 409） */
   async getRaw(path: string): Promise<Response> {
     return this.fetchImpl(this.url(path), { headers: this.headers() });

@@ -2,17 +2,35 @@
 
 /*
   CARBON ARC 设计令牌 —— 源真相见仓库根 DESIGN.md。
-  Dark "Night Bench" 为默认（第一公民）；Light "Drafting Vellum" 经 [data-theme="light"]。
-  硬规则：暖碳黑底（永不蓝黑）/ 灯丝琥珀唯一 accent / 机器产出一律 mono / radius 0 / hazard 红仅审批面。
+  2026-06-12 用户决策修订：Light "Paper Bench"（亮白暖调）为默认；线条柔和化
+  （hairline 减淡 + 适度圆角，借 ChatGPT 的留白与软线语言）。
+  仍守：灯丝琥珀唯一 accent / 机器产出一律 mono / hazard 红仅审批面 / 永不蓝黑。
 */
 
 :root,
+[data-theme="light"] {
+  /* Light · Paper Bench（亮白暖调，默认） */
+  --base: #ffffff;
+  --surface: #f9f7f4;
+  --panel: #f1eee8;
+  --hairline: #e8e4dc;
+  --text: #211c15;
+  --muted: #8a8071;
+  --accent: #b85a10;
+  --accent-hot: #d97a1f;
+  --violet: #5b3fd6;
+  --positive: #4f7a3d;
+  --brass: #8a6f35;
+  --hazard: #c62a12;
+  --del-ash: #a89a87;
+}
+
 [data-theme="dark"] {
-  /* Dark · Night Bench */
+  /* Dark · Night Bench（手动切换保留） */
   --base: #14110e;
   --surface: #1c1813;
   --panel: #262019;
-  --hairline: #3a3128;
+  --hairline: #322b22;
   --text: #ece3d4;
   --muted: #9a8f7f;
   --accent: #f4933a;
@@ -22,23 +40,6 @@
   --brass: #c9a86a;
   --hazard: #ff4d2e;
   --del-ash: #6b5f52;
-}
-
-[data-theme="light"] {
-  /* Light · Drafting Vellum（完整暖 vellum 设计，非反色） */
-  --base: #f4eee1;
-  --surface: #fbf7ee;
-  --panel: #efe7d6;
-  --hairline: #d8cdb8;
-  --text: #221c14;
-  --muted: #6e6354;
-  --accent: #b85a10;
-  --accent-hot: #d97a1f;
-  --violet: #5b3fd6;
-  --positive: #4f7a3d;
-  --brass: #8a6f35;
-  --hazard: #c62a12;
-  --del-ash: #a89a87;
 }
 
 /* @theme inline：令牌以 var() 直引，故 [data-theme] 运行时切换即时生效 */
@@ -62,7 +63,7 @@
   --font-mono: "Commit Mono", "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
 
-  /* radius 0 为默认（制图美学，方角）；仅圆点/头像允许圆形 */
+  /* 2026-06-12 修订：适度圆角（柔和化）；审批模态等信任面保持方角严酷 */
   --radius-none: 0px;
 
   /* 间距基 4px（DESIGN.md Spacing） */
@@ -96,6 +97,106 @@
     background-color: var(--accent);
     color: var(--base);
   }
+}
+
+/*
+  .prose-arc —— Agent 回答正文的 markdown 排版纪律（CARBON ARC）：
+  排版扛层级（Hanken 600 标题，无装饰）；机器声（code/pre/表格数字）一律 mono；
+  细线是唯一分隔语言；零圆角零阴影。
+*/
+.prose-arc {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.prose-arc > :first-child {
+  margin-top: 0;
+}
+.prose-arc > :last-child {
+  margin-bottom: 0;
+}
+.prose-arc p {
+  margin: 8px 0;
+}
+.prose-arc h1,
+.prose-arc h2,
+.prose-arc h3,
+.prose-arc h4 {
+  font-weight: 600;
+  color: var(--text);
+  margin: 16px 0 8px;
+}
+.prose-arc h1 {
+  font-size: 20px;
+}
+.prose-arc h2 {
+  font-size: 16px;
+}
+.prose-arc h3,
+.prose-arc h4 {
+  font-size: 14px;
+}
+.prose-arc ul,
+.prose-arc ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.prose-arc ul {
+  list-style: square; /* 方角制图语言，不用圆点 disc */
+}
+.prose-arc li {
+  margin: 2px 0;
+}
+.prose-arc code {
+  font-size: 12px;
+  background-color: var(--panel);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.prose-arc pre {
+  margin: 8px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.prose-arc pre code {
+  background: none;
+  padding: 0;
+}
+.prose-arc a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.prose-arc blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--hairline);
+  color: var(--muted);
+}
+.prose-arc hr {
+  border: none;
+  border-top: 1px solid var(--hairline);
+  margin: 16px 0;
+}
+.prose-arc table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.prose-arc th,
+.prose-arc td {
+  border: 1px solid var(--hairline);
+  padding: 4px 10px;
+  text-align: left;
+}
+.prose-arc th {
+  font-weight: 600;
+}
+.prose-arc strong {
+  font-weight: 700;
 }
 
 /*

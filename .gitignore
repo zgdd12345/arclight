@@ -233,3 +233,8 @@ coverage/
 .arclight/
 results/
 .playwright-mcp/
+
+# 本仓为 TS monorepo：上面 Python 模板的 lib/ 规则会误伤源码目录 packages/*/src/lib/，
+# 导致新建源文件被静默忽略（exportMarkdown.ts 即曾中招）。放行源码 lib 目录。
+!packages/*/src/lib/
+!packages/*/src/lib/**

@@ -4,12 +4,17 @@ import { cors } from "hono/cors";
 import type { ApprovalPolicy } from "../approval/policy";
 import type { Db } from "../db/client";
 import type { EventBus } from "../events/bus";
+import type { ProviderManager } from "../loop/provider-manager";
 import type { AgentRunner } from "../loop/runner";
 import { bearerAuth } from "./middleware/auth";
 import { requestContext } from "./middleware/requestContext";
 import { createCommandsRoute } from "./routes/commands";
+import { createConfigRoute } from "./routes/config";
 import { createEventsRoute } from "./routes/events";
+import { createFilesRoute } from "./routes/files";
+import { createGrantsRoute } from "./routes/grants";
 import { healthRoute } from "./routes/health";
+import { createMemoriesRoute } from "./routes/memories";
 import { createProjectsRoute } from "./routes/projects";
 import { createSessionsRoute } from "./routes/sessions";
 import { createSnapshotRoute } from "./routes/snapshot";
@@ -26,6 +31,8 @@ export type AppDeps = {
   mockDeltaMs?: number; // 测试注入
   devNoAuth?: boolean; // 测试旁路：放行所有鉴权（ARCLIGHT_DEV_NO_AUTH=1）
   projectsRoot?: string; // 项目围栏根（缺省 = repoPath 的父目录）
+  providerManager?: ProviderManager; // 模型/thinking 运行时切换（serve 注入；缺省 /api/config 503）
+  effectiveWindow?: number; // 上下文压缩窗口（须与 runner 一致；/context-usage 端点据此报余量）
 };
 
 /** 私网/回环主机名分类：localhost、127/8 与 ::1 回环、RFC1918（10/8、172.16-31、192.168/16）、
@@ -99,7 +106,12 @@ export function createApp(deps: AppDeps) {
   );
   api.route(
     "/sessions",
-    createSessionsRoute({ db: deps.db, repoPath: deps.repoPath, arclightDir: deps.arclightDir }),
+    createSessionsRoute({
+      db: deps.db,
+      repoPath: deps.repoPath,
+      arclightDir: deps.arclightDir,
+      ...(deps.effectiveWindow !== undefined ? { effectiveWindow: deps.effectiveWindow } : {}),
+    }),
   );
   api.route(
     "/projects",
@@ -118,6 +130,18 @@ export function createApp(deps: AppDeps) {
     }),
   );
   api.route("/sessions", createSnapshotRoute({ db: deps.db }));
+  api.route("/sessions", createFilesRoute({ db: deps.db })); // 📎 附件上传
+  api.route(
+    "/sessions",
+    createGrantsRoute(deps.approvals !== undefined ? { approvals: deps.approvals } : {}),
+  ); // 审批白名单管理
+  api.route("/memories", createMemoriesRoute({ db: deps.db })); // 记忆管理
+  api.route(
+    "/config",
+    createConfigRoute(
+      deps.providerManager !== undefined ? { providerManager: deps.providerManager } : {},
+    ),
+  ); // 供应商/模型
   app.route("/api", api);
   return app;
 }

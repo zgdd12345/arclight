@@ -13,6 +13,7 @@ export type AuditEventKind =
   | "approval.asked"
   | "approval.decided"
   | "approval.expired"
+  | "approval.revoked"
   | "sandbox.run"
   | "sandbox.denied"
   | "blacklist.hit"

@@ -10,8 +10,17 @@ export const metadata: Metadata = {
 // Fontsource CDN 取 Commit Mono。全部走 <link> 运行时加载，构建期无网络依赖。
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
+    <html lang="zh-CN" data-theme="light" suppressHydrationWarning>
       <head>
+        {/* 主题以 light 为默认（2026-06-12 用户决策）；用户切换持久化于 localStorage，
+            首帧前同步回填防闪烁 */}
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: 主题回填须在首帧前同步执行
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("arclight.theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}',
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

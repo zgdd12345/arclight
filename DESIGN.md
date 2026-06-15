@@ -34,7 +34,7 @@
 
 - **Approach:** restrained——单 accent + 暖中性色 + 严格的语义专色。
 
-### Dark · "Night Bench"（默认）
+### Dark · "Night Bench"（手动切换保留）
 
 | Token | Hex | 用途纪律 |
 |---|---|---|
@@ -52,16 +52,16 @@
 | `--hazard` | `#FF4D2E` | **危险红：全产品仅审批面可用，他处一律禁止** |
 | `--del-ash` | `#6B5F52` | diff 删除（灰烬+删除线，不用尖叫红） |
 
-### Light · "Drafting Vellum"
+### Light · "Paper Bench"（默认，2026-06-12 修订）
 
 | Token | Hex |
 |---|---|
-| `--base` | `#F4EEE1`（制图羊皮纸） |
-| `--surface` | `#FBF7EE` |
-| `--panel` | `#EFE7D6` |
-| `--hairline` | `#D8CDB8` |
-| `--text` | `#221C14` |
-| `--muted` | `#6E6354` |
+| `--base` | `#FFFFFF`（亮白） |
+| `--surface` | `#F9F7F4`（暖米白：侧栏/卡片） |
+| `--panel` | `#F1EEE8` |
+| `--hairline` | `#E8E4DC`（柔和暖灰，借 ChatGPT 软线语言） |
+| `--text` | `#211C15` |
+| `--muted` | `#8A8071` |
 | `--accent` | `#B85A10`（压暗保对比度） |
 | `--accent-hot` | `#D97A1F` |
 | `--violet` | `#5B3FD6` |
@@ -70,8 +70,8 @@
 | `--hazard` | `#C62A12` |
 | `--del-ash` | `#A89A87` |
 
-- **与 Claude Code 区隔纪律:** 琥珀必须偏金/橙黄（非珊瑚），底必须碳棕（非奶油），机器声 mono 占比高——三者合力与 Anthropic 暖珊瑚橙拉开。
-- **Dark mode 策略:** dark 是第一公民；light 是完整的暖 vellum 设计，不是反色。
+- **与 Claude Code 区隔纪律:** 琥珀必须偏金/橙黄（非珊瑚），机器声 mono 占比高。
+- **主题策略（2026-06-12 修订）:** light 亮白为默认（用户决策）；dark "Night Bench" 经切换保留且持久化（localStorage `arclight.theme`）。
 
 ## Spacing
 
@@ -85,8 +85,8 @@
 - **核心模式——工程日志流（无聊天气泡）:** 消息流是带基线网格的 ruled transcript。左 gutter（~88px）放 mono 角色标识（USER 黄铜色 / AGENT 琥珀色）、时间戳、token 增量。正文区上限 ~680px 行宽。
 - **工具卡 = 台架仪器:** 单线边框卡片，头部一行：风险徽章 + 工具名（琥珀 mono）+ 目标路径 + 右侧读数（exit code / 耗时 / 字节数）。diff 卡：行号 gutter + 鼠尾草新增/灰烬删除线；终端卡：碳黑底 mono 流。
 - **状态栏 = 仪表条:** 顶栏右侧黄铜成本仪表（细 bar + 游标），wordmark 用 Fraunces。
-- **Grid:** 侧栏 200px + 主区流式；桌面 1080px 内容上限；移动端收起侧栏。
-- **Border radius:** **0px 为默认**（制图美学，方角）；仅风险徽章圆点和头像允许圆形。胶囊按钮是 Codex 的语言，不是我们的。
+- **Grid:** 侧栏 264px（可折叠至 52px 窄栏，仿 ChatGPT）+ 主区居中对话列（~840px）；移动端收起侧栏。
+- **Border radius（2026-06-12 修订）:** 常规交互面允许适度圆角（卡片/输入框/按钮 6-16px，柔和化，借 ChatGPT）；**审批模态等信任面保持方角严酷**——危险时刻的视觉降温不打折。
 
 ## Motion
 
@@ -118,3 +118,4 @@
 | 2026-06-11 | CARBON ARC 初版定稿 | /design-consultation：竞品研究（Codex 严酷黑白/排版纪律）+ Claude 子代理提案（暖弧光洞察）双声音综合；Codex CLI 外部声音超时弃用（已记账）。用户审阅 HTML 预览页（明暗双模式 + 实景 mockup）后批准 |
 | 2026-06-11 | 字体用免费三件套（Commit Mono / Hanken Grotesk / Fraunces） | Berkeley Mono / Söhne 为付费字体，列为后置升级项 |
 | 2026-06-11 | 方角（radius 0）为默认 | 制图美学一致性；与 Codex 胶囊语言、品类圆角卡片惯例双向区隔 |
+| 2026-06-12 | 默认主题改 light 亮白（Paper Bench）；线条柔和化：hairline 减淡、消息间分隔线改留白、常规交互面适度圆角；侧栏可折叠 | 用户明确指示参照 ChatGPT 修订（覆盖 radius-0 与 dark-默认两条原决策）；信任面（审批模态）维持方角+hazard 纪律不变 |

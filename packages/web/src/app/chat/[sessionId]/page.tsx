@@ -20,6 +20,7 @@ export default function ChatPage() {
   const router = useRouter();
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [conn, setConn] = useState<ArcConnection | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -40,7 +41,11 @@ export default function ChatPage() {
   // 两栏布局：左 ChatGPT 式侧边栏（项目+历史），右会话主区。侧栏自连内核，连接中也先显示。
   return (
     <div className="flex h-dvh bg-base">
-      <ProjectSidebar activeSessionId={sessionId} />
+      <ProjectSidebar
+        activeSessionId={sessionId}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+      />
       {!conn ? (
         <main className="flex flex-1 items-center justify-center">
           <span className="text-[13px] text-muted" style={{ fontFamily: "var(--font-mono)" }}>
@@ -50,7 +55,7 @@ export default function ChatPage() {
       ) : (
         <div className="flex min-w-0 flex-1 flex-col">
           <ArcRuntimeProvider sessionId={sessionId} store={conn.store} command={conn.command}>
-            <SessionStatusBar status={status} />
+            <SessionStatusBar status={status} onToggleNav={() => setMobileNavOpen(true)} />
             <ArcThread />
             {/* 断电闸刀：信任面纪律②。挂在 provider 内以读 store.pendingApprovals；command 直传内核审批。 */}
             <PermissionModal command={conn.command} />

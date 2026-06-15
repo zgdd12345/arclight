@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `context_tokens` integer DEFAULT 0 NOT NULL;

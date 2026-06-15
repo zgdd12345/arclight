@@ -11,6 +11,7 @@
 
 import type { ToolPart } from "@arclight/client-core";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import { useState } from "react";
 import { useArcSession } from "../../lib/assistantRuntime";
 import { DiffView } from "./DiffView";
 
@@ -50,9 +51,7 @@ function findToolPart(
   callId: string,
 ): ToolPart | null {
   for (let mi = messages.length - 1; mi >= 0; mi--) {
-    const msg = messages[mi];
-    if (!msg) continue;
-    for (const part of msg.parts) {
+    for (const part of messages[mi]?.parts ?? []) {
       if (part.type === "tool" && part.callId === callId) return part;
     }
   }
@@ -90,6 +89,9 @@ function statusColor(status: ToolPart["status"]): string {
 export function ToolCallCard({ toolCallId, toolName, argsText }: ToolCallMessagePartProps) {
   const state = useArcSession();
   const part = findToolPart(state.messages, toolCallId);
+  // 处理过程折叠纪律（借 ChatGPT 步骤披露）：执行中/出错默认展开盯现场，
+  // 成功后自动折叠成一行读数；用户手动开合后定格，不再被自动行为覆盖。
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   const name = part?.name ?? toolName;
   const args = part?.argsPreview ?? argsText ?? "";
@@ -98,17 +100,26 @@ export function ToolCallCard({ toolCallId, toolName, argsText }: ToolCallMessage
   const riskTier = part?.riskTier ?? "";
   const output = part?.outputPreview || part?.progress || "";
   const hint = renderHint(name);
+  const hasBody =
+    hint === "diff" ? Boolean(args || output) : Boolean(output || (hint === "json" && args));
+  const open = (userOpen ?? status !== "ok") && hasBody;
 
   return (
     <div
-      className="my-3 border bg-surface font-mono text-[12px]"
+      className="my-3 overflow-hidden rounded-lg border bg-surface font-mono text-[12px]"
       style={{ borderColor: "var(--hairline)" }}
     >
-      {/* 头部读数行 */}
-      <div
-        className="flex items-center gap-3 border-b px-3 py-2"
-        style={{ borderColor: "var(--hairline)" }}
+      {/* 头部读数行（可点击开合） */}
+      <button
+        type="button"
+        onClick={() => setUserOpen(!open)}
+        aria-expanded={open}
+        className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left${open ? " border-b" : ""}`}
+        style={open ? { borderColor: "var(--hairline)" } : undefined}
       >
+        <span className="select-none text-muted" aria-hidden>
+          {hasBody ? (open ? "▾" : "▸") : "·"}
+        </span>
         <span className="font-[700] text-accent">{name}</span>
         {args ? (
           <span className="flex-1 truncate text-muted">{args}</span>
@@ -117,12 +128,15 @@ export function ToolCallCard({ toolCallId, toolName, argsText }: ToolCallMessage
         )}
         {riskClass ? (
           <span
-            className="border px-1.5 py-0.5 text-[11px] uppercase tracking-wide"
+            className="rounded border px-1.5 py-0.5 text-[11px] uppercase tracking-wide"
             style={{ color: riskColor(riskClass), borderColor: riskColor(riskClass) }}
           >
             {riskClass}
             {riskTier ? ` · ${riskTier}` : ""}
           </span>
+        ) : null}
+        {status === "running" || status === "requested" ? (
+          <span className="filament inline-block h-2 w-2 rounded-full bg-accent" aria-hidden />
         ) : null}
         <span
           className="text-[11px] uppercase tracking-wide"
@@ -130,10 +144,10 @@ export function ToolCallCard({ toolCallId, toolName, argsText }: ToolCallMessage
         >
           {status}
         </span>
-      </div>
+      </button>
 
       {/* 主体：按 ToolRenderHint 分发（spillRef 完整输出懒拉后置 slice2+） */}
-      <ToolBody hint={hint} name={name} args={args} output={output} />
+      {open ? <ToolBody hint={hint} name={name} args={args} output={output} /> : null}
     </div>
   );
 }

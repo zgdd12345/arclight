@@ -601,3 +601,53 @@ describe("审批接缝（完整四终态状态机绑 Unit 4）", () => {
     expect(outcome.status).toBe("interrupted");
   });
 });
+
+describe("thinking.delta：reasoning 声道转发（声道切换冲缓冲，seq 忠实于模型产出顺序）", () => {
+  test("reasoning→text→reasoning 交错：thinking.delta / message.delta 按序落库且同 messageId", async () => {
+    const provider = scriptedProvider([
+      {
+        parts: [
+          { type: "reasoning-delta", text: "推理 A" },
+          { type: "reasoning-delta", text: "·推理 B" },
+          { type: "text-delta", text: "答案" },
+          { type: "reasoning-delta", text: "再想想" },
+          { type: "text-delta", text: "补充" },
+        ],
+        result: { text: "答案补充", toolCalls: [], finishReason: "stop" },
+      },
+    ]);
+    const { events, outcome } = await drain(makeState(), makeDeps({ callProvider: provider }));
+    expect(events.map((e) => e.t)).toEqual([
+      "thinking.delta",
+      "message.delta",
+      "thinking.delta",
+      "message.delta",
+      "turn.completed",
+    ]);
+    const thinks = events.filter((e) => e.t === "thinking.delta") as Extract<
+      ArcEvent,
+      { t: "thinking.delta" }
+    >[];
+    const texts = events.filter((e) => e.t === "message.delta") as Extract<
+      ArcEvent,
+      { t: "message.delta" }
+    >[];
+    expect(thinks[0]?.delta).toBe("推理 A·推理 B"); // 同声道续接合批
+    expect(thinks[1]?.delta).toBe("再想想");
+    expect(texts.map((e) => e.delta)).toEqual(["答案", "补充"]);
+    // 双声道同源：同一次 provider 调用 = 同 messageId
+    expect(thinks[0]?.messageId).toBe(texts[0]?.messageId);
+    expect(outcome.status).toBe("completed");
+  });
+
+  test("纯 reasoning 无正文（思考后直接收口）：尾部冲刷不丢思考内容", async () => {
+    const provider = scriptedProvider([
+      {
+        parts: [{ type: "reasoning-delta", text: "只想不说" }],
+        result: { text: "", toolCalls: [], finishReason: "stop" },
+      },
+    ]);
+    const { events } = await drain(makeState(), makeDeps({ callProvider: provider }));
+    expect(events.map((e) => e.t)).toEqual(["thinking.delta", "turn.completed"]);
+  });
+});

@@ -89,6 +89,16 @@ export function createCommandsRoute(deps: {
             input: cmd.input,
           })
           .run();
+        // 会话自动标题（仿 ChatGPT）：title 为空时取首条提问前 40 字；/undo 等斜杠命令不作标题。
+        if (!session.title) {
+          const autoTitle = cmd.input.text.trim().replace(/\s+/g, " ").slice(0, 40);
+          if (autoTitle && !autoTitle.startsWith("/")) {
+            db.update(sessions)
+              .set({ title: autoTitle })
+              .where(eq(sessions.id, cmd.sessionId))
+              .run();
+          }
+        }
         // fire-and-forget：事件经 appendEvent 落库后由 bus 推给 SSE
         // baseEpoch 透传至准入 append 作 expectedEpoch：上面的 epoch 预检是事务外 TOCTOU 读，
         // 真正的 seq/epoch 不变式守护在首个 append 的事务内复核（appendEvent expectedEpoch）。

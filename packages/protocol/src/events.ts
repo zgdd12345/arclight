@@ -32,6 +32,24 @@ export const MessageDeltaSchema = z.object({
   delta: z.string(), // 内核侧 100-250ms 合批
 });
 
+// user.message：用户输入回显帧。问答 transcript 的"问"必须落事件流——
+// 否则只存在于客户端乐观消息里，刷新/重连/历史回放即丢。turn 准入时单点发出。
+export const UserMessageSchema = z.object({
+  ...base,
+  t: z.literal("user.message"),
+  messageId: z.string().min(1),
+  text: z.string(),
+});
+
+// thinking.delta：模型推理（reasoning/thinking）流。与 message.delta 同源同 messageId，
+// 仅声道不同——前端渲染为可折叠"思考过程"披露区，不混入正文。
+export const ThinkingDeltaSchema = z.object({
+  ...base,
+  t: z.literal("thinking.delta"),
+  messageId: z.string().min(1),
+  delta: z.string(),
+});
+
 export const ToolRequestedSchema = z.object({
   ...base,
   t: z.literal("tool.requested"),
@@ -110,6 +128,8 @@ export const ArcEventSchema = z.discriminatedUnion("t", [
   SessionStartedSchema,
   TurnStartedSchema,
   MessageDeltaSchema,
+  UserMessageSchema,
+  ThinkingDeltaSchema,
   ToolRequestedSchema,
   ToolProgressSchema,
   ToolOutputSchema,

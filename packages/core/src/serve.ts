@@ -7,7 +7,7 @@ import { loadConfig } from "./config/load";
 import { createDb } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { EventBus } from "./events/bus";
-import { makeCallProvider } from "./loop/provider-adapter";
+import { ProviderManager } from "./loop/provider-manager";
 import { AgentRunner } from "./loop/runner";
 import { CODE_AGENT_SYSTEM_PROMPT } from "./loop/system-prompt";
 import { AuditLog } from "./observability/audit";
@@ -58,16 +58,22 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     audit: (kind, detail, sessionId) =>
       audit.write(runId, { kind, actor: "agent", detail, ...(sessionId ? { sessionId } : {}) }),
   }); // fail-closed：黑名单永拒 + confirm 弹审批
+  // ProviderManager：runner 持稳定委托，/api/config PATCH 热切换 model/thinking
+  const providerManager = new ProviderManager(
+    {
+      apiKey: config.anthropicApiKey,
+      model: config.model,
+      systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
+      thinking: config.thinking,
+      ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
+    },
+    arclightDir,
+  );
   const runner = new AgentRunner({
     db,
     bus,
     registry,
-    callProvider: makeCallProvider({
-      apiKey: config.anthropicApiKey,
-      model: config.model,
-      systemPrompt: CODE_AGENT_SYSTEM_PROMPT,
-      ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
-    }),
+    callProvider: providerManager.callProvider,
     executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
     approvals,
     onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
@@ -92,6 +98,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     runner,
     approvals,
     devNoAuth,
+    providerManager,
     // projectsRoot 在 loadConfig 内恒被计算，但类型为 optional；exactOptionalPropertyTypes 下条件展开。
     ...(projectsRoot !== undefined ? { projectsRoot } : {}),
   });

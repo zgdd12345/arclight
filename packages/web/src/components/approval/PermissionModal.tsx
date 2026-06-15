@@ -17,6 +17,33 @@ import { isDangerousRisk, RiskBadge, riskLevelColor } from "./RiskBadge";
 
 const HOLD_MS = 800;
 
+// 审批桌面通知：审批 60s 自动过期，用户切走标签页极易错过。permission.ask 到达且
+// 页面不可见时弹 Web Notification（仅在已授权时）；点击聚焦窗口。授权请求由设置页的
+// "开启审批通知"按钮发起（需用户手势）；此处只读 Notification.permission，不主动弹窗请求。
+function useApprovalNotification(
+  askId: string | null,
+  commandText: string,
+  riskLabel: string,
+): void {
+  useEffect(() => {
+    if (!askId) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (typeof document !== "undefined" && document.visibilityState === "visible") return;
+
+    const n = new Notification("arclight · 需要授权", {
+      body: `${riskLabel}\n${commandText.slice(0, 120)}`,
+      tag: `arclight-approval-${askId}`,
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+    // ask 解决/切换 → 关掉这条通知（避免堆积陈旧提醒）
+    return () => n.close();
+  }, [askId, commandText, riskLabel]);
+}
+
 // 前端倒计时（仅 UX 提示）：从 expiresAt 算剩余秒，250ms 刷新一次。
 function useCountdown(expiresAt: number): number {
   const [secs, setSecs] = useState(() => Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
@@ -127,6 +154,13 @@ export function PermissionModal({ command }: { command: CommandClient }) {
 
   const expiresAt = ask?.expiresAt ?? 0;
   const secs = useCountdown(expiresAt);
+
+  // 桌面通知（hook 须在早返回前调用；ask 为 null 时传空值，hook 内部短路不弹）
+  const notifyText =
+    ask && typeof ask.detail.command === "string" && ask.detail.command.trim()
+      ? ask.detail.command
+      : (ask?.action ?? "");
+  useApprovalNotification(askId, notifyText, ask ? `风险 ${ask.risk} · ${ask.cls}` : "");
 
   if (!ask) return null;
 

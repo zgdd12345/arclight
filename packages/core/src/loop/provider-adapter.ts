@@ -19,7 +19,15 @@ export type ProviderProfile = {
   systemPrompt: string;
   baseUrl?: string; // 协议兼容端点（如智谱 bigmodel，D4 补充记账）；缺省 Anthropic 官方
   maxOutputTokens?: number;
+  // 扩展思考（thinking/reasoning）：开启后流里出现 reasoning-delta，loop 转发为 thinking.delta。
+  // GLM-4.6（Anthropic 兼容端点）与 Anthropic 官方均走 providerOptions.anthropic.thinking。
+  thinking?: boolean;
 };
+
+// thinking 预算与配套 max_tokens：Anthropic 要求 budget < max_tokens，且 @ai-sdk/anthropic
+// 缺省 max_tokens=4096 会与预算冲突——开 thinking 时必须显式抬高输出上限。
+const THINKING_BUDGET_TOKENS = 4096;
+const THINKING_MIN_OUTPUT_TOKENS = 16384;
 
 export function makeCallProvider(profile: ProviderProfile): CallProvider {
   const anthropic = createAnthropic({
@@ -34,6 +42,10 @@ export function makeCallProvider(profile: ProviderProfile): CallProvider {
   ): AsyncGenerator<ProviderStreamPart, ProviderResult> {
     let text = "";
     const toolCalls: ProviderToolCall[] = [];
+    const thinking = profile.thinking === true;
+    const maxOutputTokens = thinking
+      ? Math.max(profile.maxOutputTokens ?? 0, THINKING_MIN_OUTPUT_TOKENS)
+      : profile.maxOutputTokens;
     try {
       const res = streamText({
         model: anthropic(profile.model),
@@ -42,8 +54,15 @@ export function makeCallProvider(profile: ProviderProfile): CallProvider {
         tools: toAiTools(tools),
         stopWhen: stepCountIs(1), // ★ 禁止 AI SDK 自跑工具循环
         abortSignal: signal,
-        ...(profile.maxOutputTokens !== undefined
-          ? { maxOutputTokens: profile.maxOutputTokens }
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+        ...(thinking
+          ? {
+              providerOptions: {
+                anthropic: {
+                  thinking: { type: "enabled", budgetTokens: THINKING_BUDGET_TOKENS },
+                },
+              },
+            }
           : {}),
       });
       for await (const part of res.fullStream) {

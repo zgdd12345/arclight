@@ -18,6 +18,9 @@ export const ConfigSchema = z.object({
   host: z.string().default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(43127),
   model: z.string().default("claude-sonnet-4-5"),
+  // 扩展思考（thinking.delta 事件源）：默认开。前端"思考过程"披露区依赖此流；
+  // 端点不支持时设 ARCLIGHT_THINKING=0 或 config.json {"thinking": false} 关闭。
+  thinking: z.boolean().default(true),
   // 鉴权全局放行开关：仅当 ARCLIGHT_DEV_NO_AUTH === "1" 时为 true（保留精确 "=1" 语义）。
   // 仅限本地测试，切勿用于暴露到不可信网络的部署。默认关闭。
   devNoAuth: z.boolean().default(false),
@@ -52,6 +55,10 @@ export function loadConfig(repoPath: string): ArclightConfig {
   if (process.env.ARCLIGHT_HOST) env.host = process.env.ARCLIGHT_HOST;
   if (process.env.ARCLIGHT_PORT) env.port = Number(process.env.ARCLIGHT_PORT);
   if (process.env.ARCLIGHT_MODEL) env.model = process.env.ARCLIGHT_MODEL;
+  // thinking 开关：精确 "=0" 关闭，其余设置值均视为开启（与 devNoAuth 的 "=1" 语义互补：默认开的开关）。
+  if (process.env.ARCLIGHT_THINKING !== undefined) {
+    env.thinking = process.env.ARCLIGHT_THINKING !== "0";
+  }
   // 鉴权放行：精确 "=1" 语义。设置了该 env 才覆盖 config.json/默认；其余值（含 "0"）均为 false。
   if (process.env.ARCLIGHT_DEV_NO_AUTH !== undefined) {
     env.devNoAuth = process.env.ARCLIGHT_DEV_NO_AUTH === "1";
