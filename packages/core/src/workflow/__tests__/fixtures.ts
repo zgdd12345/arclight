@@ -45,7 +45,7 @@ export const allowAllApprovals: ApprovalSeam = {
   },
 };
 
-// WorkflowContext.store 是必填字段（M0），但 runSubagent(M1) 不触达 store——给一个抛错桩满足类型。
+// WorkflowContext.store 是可选字段（store?），但 runSubagent(M1) 不触达 store——给一个抛错桩满足类型。
 export const dummyStore: WorkflowStorePort = {
   has: () => false,
   load: (name) => {
@@ -72,6 +72,7 @@ export function makeCtx(opts: {
   executeTool?: WorkflowContext["executeTool"];
   signal?: AbortSignal; // run 级父信号（M0 WorkflowContext.signal）
   maxReflections?: number;
+  emit?: WorkflowContext["emit"];
   onPhase?: (t: string) => void;
   onLog?: (m: string) => void;
 }): WorkflowContext {
@@ -85,7 +86,7 @@ export function makeCtx(opts: {
     registry: opts.registry ?? new ToolRegistry(),
     approvals: allowAllApprovals,
     executeTool: opts.executeTool ?? makeExecuteTool({ sandbox: dummySandbox }),
-    emit: emitSpy().emit,
+    emit: opts.emit ?? emitSpy().emit,
     store: dummyStore,
     maxRetries: 0,
     maxReflections: opts.maxReflections ?? 3,

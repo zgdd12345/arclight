@@ -62,6 +62,7 @@ function defaultRolePrompt(spec: AgentSpec): string {
   return lines.join(" ");
 }
 
+// Precondition: only called after queryLoop returned {status:"completed"}. Both completed exits push a plain {role:"assistant"} text message, so the "" fallback is unreachable in correct usage.
 function finalAssistantText(messages: LlmMessage[]): string {
   // queryLoop 完成时把最终 assistant 文本 append 进 state.messages（query-loop.ts:146）。
   for (let i = messages.length - 1; i >= 0; i--) {
