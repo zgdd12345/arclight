@@ -44,12 +44,8 @@ export type AgentSpec = {
 };
 
 // StageSpec：pipeline 的声明式阶段规格（AgentSpec 的子集；无 label/phase/isolation）。首见 M2。
-export type StageSpec = {
-  prompt: string;
-  schema?: JsonSchema;
-  tools?: string[];
-  model?: string;
-};
+// Pick 形式确保与 AgentSpec 字段同步，不会悄悄漂移。
+export type StageSpec = Pick<AgentSpec, "prompt" | "schema" | "tools" | "model">;
 
 // ── 3. subagent 结果（统一一种形态）─────────────────────────────────────────
 // SpecResult：subagent 最终产物——结构化对象（有 schema）或纯文本（无 schema），须 JSON 可序列化。
@@ -182,8 +178,8 @@ export type WorkflowContext = {
   onPhase?: (title: string) => void;
   onLog?: (msg: string) => void;
 
-  // run 编排所需（M3/M5/M6）
-  store: WorkflowStorePort;
+  // run 编排所需（M3/M5/M6）；M1/M2 不提供，M6 装配时注入
+  store?: WorkflowStorePort;
   journal?: WorkflowJournalPort;
   /** 跨 run 共享 token budget 上限（token 数）。 */
   budgetTotal?: number;
@@ -220,16 +216,19 @@ export class WorkflowApiError extends Error {
   }
 }
 
-/** §2.1 asyncify 守卫：规格必须可序列化（禁 guest 闭包），否则挂起期会迫使再入 guest。 */
+/** §2.1 asyncify 守卫：规格必须可序列化（禁 guest 闭包），否则挂起期会迫使再入 guest。递归检查嵌套对象。 */
 export function assertSerializableSpec(s: unknown, where: string): void {
-  if (typeof s !== "object" || s === null) {
+  if (typeof s !== "object" || s === null || Array.isArray(s)) {
     throw new WorkflowApiError(`${where}: spec must be a plain object`);
   }
   for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
     if (typeof v === "function") {
       throw new WorkflowApiError(
-        `${where}: field "${k}" must be serializable — closures are forbidden under QuickJS asyncify single-suspend (spec §2.1)`,
+        `${where}: field "${k}" is a closure — forbidden under QuickJS asyncify (spec §2.1)`,
       );
+    }
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+      assertSerializableSpec(v, `${where}.${k}`);
     }
   }
 }
@@ -240,10 +239,23 @@ export function validateAgentSpec(s: unknown, where: string): AgentSpec {
   if (typeof spec.prompt !== "string" || spec.prompt.length === 0) {
     throw new WorkflowApiError(`${where}: spec.prompt must be a non-empty string`);
   }
+  if (spec.tools !== undefined && !Array.isArray(spec.tools)) {
+    throw new WorkflowApiError(`${where}: spec.tools must be a string[]`);
+  }
+  if (spec.schema !== undefined) {
+    const r = JsonSchemaZ.safeParse(spec.schema);
+    if (!r.success) throw new WorkflowApiError(`${where}: spec.schema is not a valid JsonSchema`);
+  }
   return spec as unknown as AgentSpec;
 }
 
 export function validateStageSpec(s: unknown, where: string): StageSpec {
-  validateAgentSpec(s, where); // StageSpec ⊂ AgentSpec：复用 prompt 必填 + 闭包守卫
-  return s as unknown as StageSpec;
+  validateAgentSpec(s, where); // 复用 prompt 必填 + tools/schema 校验 + 闭包守卫
+  const spec = s as Record<string, unknown>;
+  // 返回仅含 StageSpec 字段的新对象，排除 AgentSpec 独有字段（isolation/label/phase 等）
+  const result: Partial<StageSpec> = { prompt: spec.prompt as string };
+  if (spec.schema !== undefined) result.schema = spec.schema as JsonSchema;
+  if (spec.tools !== undefined) result.tools = spec.tools as string[];
+  if (spec.model !== undefined) result.model = spec.model as string;
+  return result as StageSpec;
 }

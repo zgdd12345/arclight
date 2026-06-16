@@ -31,6 +31,12 @@ describe("M0 共享类型契约：守卫", () => {
     expect(() => assertSerializableSpec({ cb: () => {} }, "test")).toThrow(WorkflowApiError);
   });
 
+  test("§2.1 守卫：嵌套闭包也被拒（递归检查）", () => {
+    expect(() => assertSerializableSpec({ opts: { fn: () => {} } }, "test")).toThrow(
+      WorkflowApiError,
+    );
+  });
+
   test("validateAgentSpec 拒绝非对象", () => {
     expect(() => validateAgentSpec("nope", "test")).toThrow(WorkflowApiError);
     expect(() => validateAgentSpec(null, "test")).toThrow(WorkflowApiError);
@@ -39,6 +45,22 @@ describe("M0 共享类型契约：守卫", () => {
   test("validateStageSpec 复用 prompt 必填 + 闭包守卫", () => {
     expect(validateStageSpec({ prompt: "s" }, "stage").prompt).toBe("s");
     expect(() => validateStageSpec({ prompt: "" }, "stage")).toThrow(WorkflowApiError);
+  });
+
+  test("validateAgentSpec 校验 tools 必须为数组", () => {
+    expect(() => validateAgentSpec({ prompt: "ok", tools: 42 }, "test")).toThrow(WorkflowApiError);
+  });
+
+  test("validateAgentSpec 接受合法 schema", () => {
+    expect(validateAgentSpec({ prompt: "ok", schema: { type: "object" } }, "test").prompt).toBe(
+      "ok",
+    );
+  });
+
+  test("validateAgentSpec 拒绝无效 schema", () => {
+    expect(() => validateAgentSpec({ prompt: "ok", schema: { type: "weird" } }, "test")).toThrow(
+      WorkflowApiError,
+    );
   });
 });
 
@@ -70,6 +92,7 @@ describe("M0 共享类型契约：WorkflowEvent 名称常量（spec §8）", () 
   });
 });
 
+// compile-time shape gate: if this file type-checks, the type shapes are coherent. Runtime assertions are intentionally trivial.
 describe("M0 共享类型契约：类型层（编译期）钉死形态", () => {
   test("SubagentResult / Budget / RunStatus / AgentSpec / StageSpec 形态自洽", () => {
     const ok: SubagentResult = { ok: true, value: "text" };
