@@ -9,5 +9,5 @@ export { runWorkflowScript } from "./runtime";
 export { jsonSchemaToZod, makeStructuredOutputTool } from "./schema";
 export { defaultSafeToolNames, RestrictedToolRegistry, runSubagent } from "./subagent";
 
-// 低层 runWorkflowScript 消費者所需的类型别名（权威来源仍是 ./types）。
+// 低层 runWorkflowScript 消费者所需的类型别名（权威来源仍是 ./types）。
 export type { RunScriptResult, WorkflowPrimitives } from "./types";
