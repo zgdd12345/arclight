@@ -8,6 +8,7 @@ import { createDb } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { EventBus } from "./events/bus";
 import { ProviderManager } from "./loop/provider-manager";
+import { SharedRateLimiter } from "./loop/rate-limiter";
 import { AgentRunner } from "./loop/runner";
 import { CODE_AGENT_SYSTEM_PROMPT } from "./loop/system-prompt";
 import { AuditLog } from "./observability/audit";
@@ -45,6 +46,8 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
 
   // 真实流水线：单 provider（Anthropic，D4）+ 4 内置工具 + 沙箱路由 + spill
   const sandbox = new SandboxRouter();
+  // provider 共享限流：进程单例，跨所有 session / subagent 共用（spec §6 真并行前提）。
+  const sharedRateLimiter = new SharedRateLimiter({ maxConcurrent: 8 });
   const sandboxProbe = await sandbox.probe();
   log.info(sandboxProbe, "sandbox backend");
   const registry = new ToolRegistry()
@@ -68,6 +71,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
       ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
     },
     arclightDir,
+    sharedRateLimiter,
   );
   const runner = new AgentRunner({
     db,

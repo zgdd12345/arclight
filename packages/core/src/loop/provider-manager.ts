@@ -49,10 +49,14 @@ export class ProviderManager {
   constructor(
     profile: ProviderProfile,
     private readonly arclightDir: string,
+    /** 进程级共享限流（spec §6）；缺省则 callProvider = 裸稳定委托（向后兼容）。
+     *  用结构化类型而非 import SharedRateLimiter，保持 provider-manager 解耦、易测。 */
+    rateLimiter?: { wrap(provider: CallProvider): CallProvider },
   ) {
     this.profile = profile;
     this.provider = makeCallProvider(profile);
-    this.callProvider = (messages, tools, signal) => this.provider(messages, tools, signal);
+    const base: CallProvider = (messages, tools, signal) => this.provider(messages, tools, signal);
+    this.callProvider = rateLimiter ? rateLimiter.wrap(base) : base;
   }
 
   current(): ProviderInfo {
