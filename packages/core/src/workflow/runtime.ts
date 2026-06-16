@@ -6,7 +6,7 @@ import {
   type QuickJSHandle,
 } from "quickjs-emscripten";
 // 共享契约类型自 M0 单一权威来源；runtime.ts 绝不本地重声明。
-import type { AgentSpec, RunScriptResult, WorkflowPrimitives } from "./types";
+import type { AgentSpec, RunScriptResult, StageSpec, WorkflowPrimitives } from "./types";
 
 // 异步 wasm 模块按进程缓存：asyncify 变体加载一次复用（与 provider-manager 单例同构）。
 let modulePromise: Promise<QuickJSAsyncWASMModule> | undefined;
@@ -28,19 +28,42 @@ function getAsyncModule(): Promise<QuickJSAsyncWASMModule> {
 // guest 脚本直接调用 agent(...) 得到结果，不需要顶层 await。
 // （QuickJS-ng global eval 模式不支持 top-level await，与上述设计完全一致。）
 //
-// M1 只绑 agent/log/phase/args；parallel/pipeline/workflow + budget 全局的 PRELUDE 绑定归 M6。
+// M6 F1-a 扩展：绑全 M0 WorkflowPrimitives 8 项（agent/log/phase/args 保持 M1 不变）。
+// NOTE: QuickJS global eval 模式（evalCodeAsync 默认）在解析层拒绝 top-level await（"expecting ';'"），
+// 因此 parallel/pipeline/workflow 均为**同步**包装——asyncify 单挂起机制使 __parallel/__pipeline/__workflow
+// 对 guest 透明同步，与 __agent 完全对称。guest 脚本无需也不可在顶层写 await。
 const PRELUDE = `
 globalThis.args = JSON.parse(__argsJson);
 globalThis.log = (m) => { __log(String(m)); };
 globalThis.phase = (t) => { __phase(String(t)); };
 globalThis.agent = (prompt, opts) =>
   JSON.parse(__agent(String(prompt), JSON.stringify(opts === undefined ? null : opts)));
-Date.now = () => { throw new Error("Date.now() is forbidden in workflow scripts; pass time via args"); };
+globalThis.parallel = (specs) =>
+  JSON.parse(__parallel(JSON.stringify(specs === undefined ? [] : specs)));
+globalThis.pipeline = (items, ...stages) =>
+  JSON.parse(__pipeline(JSON.stringify({ items: items === undefined ? [] : items, stages })));
+globalThis.workflow = (name, wfArgs) =>
+  JSON.parse(__workflow(String(name), JSON.stringify(wfArgs === undefined ? null : wfArgs)));
+globalThis.budget = Object.freeze({
+  total: __budgetTotal,
+  spent: () => __budgetSpent(),
+  remaining: () => __budgetRemaining(),
+});
+const __NativeDate = Date;
+globalThis.Date = new Proxy(__NativeDate, {
+  apply() { throw new Error("Date() as a function is forbidden in workflow scripts; pass time via args"); },
+  construct(target, a) {
+    if (a.length === 0) {
+      throw new Error("new Date() with no args is forbidden in workflow scripts; pass time via args");
+    }
+    return Reflect.construct(target, a);
+  },
+});
+globalThis.Date.now = () => { throw new Error("Date.now() is forbidden in workflow scripts; pass time via args"); };
 Math.random = () => { throw new Error("Math.random() is forbidden in workflow scripts; pass a seed via args"); };
 `;
 
-// M1 仅消费 primitives 的 args/agent/log/phase 四个字段；parallel/pipeline/workflow/budget
-// 由 M6 扩展 PRELUDE 时接线（届时本函数追加对应 __parallel/__pipeline/__workflow 绑定 + budget 全局）。
+// M1 bindingss: args/agent/log/phase; M6 F1-a 追加: __parallel/__pipeline/__workflow + budget 桥接。
 function installPrimitives(context: QuickJSAsyncContext, p: WorkflowPrimitives): void {
   const argsJson = context.newString(JSON.stringify(p.args ?? null));
   context.setProp(context.global, "__argsJson", argsJson);
@@ -71,6 +94,51 @@ function installPrimitives(context: QuickJSAsyncContext, p: WorkflowPrimitives):
   });
   context.setProp(context.global, "__agent", agentFn);
   agentFn.dispose();
+
+  // ── M6 F1-a：parallel/pipeline/workflow（各一次 asyncify 挂起，宿主侧并发跑完，绝不回调 guest）──
+  const parallelFn = context.newAsyncifiedFunction("__parallel", async (specsH) => {
+    const specs = JSON.parse(context.getString(specsH)) as AgentSpec[];
+    const results = await p.parallel(specs);
+    return context.newString(JSON.stringify(results));
+  });
+  context.setProp(context.global, "__parallel", parallelFn);
+  parallelFn.dispose();
+
+  const pipelineFn = context.newAsyncifiedFunction("__pipeline", async (argH) => {
+    const { items, stages } = JSON.parse(context.getString(argH)) as {
+      items: unknown[];
+      stages: StageSpec[];
+    };
+    const results = await p.pipeline(items, ...stages);
+    return context.newString(JSON.stringify(results));
+  });
+  context.setProp(context.global, "__pipeline", pipelineFn);
+  pipelineFn.dispose();
+
+  const workflowFn = context.newAsyncifiedFunction("__workflow", async (nameH, argsH) => {
+    const name = context.getString(nameH);
+    const argsJson = context.getString(argsH);
+    const wfArgs = argsJson === "null" ? undefined : (JSON.parse(argsJson) as unknown);
+    const result = await p.workflow(name, wfArgs);
+    return context.newString(JSON.stringify(result ?? null));
+  });
+  context.setProp(context.global, "__workflow", workflowFn);
+  workflowFn.dispose();
+
+  // ── M6 F1-a：budget 同步桥接（total 快照于 PRELUDE 求值时；spent/remaining 实时）──
+  const totalH = context.newNumber(p.budget.total);
+  context.setProp(context.global, "__budgetTotal", totalH);
+  totalH.dispose();
+
+  const spentFn = context.newFunction("__budgetSpent", () => context.newNumber(p.budget.spent()));
+  context.setProp(context.global, "__budgetSpent", spentFn);
+  spentFn.dispose();
+
+  const remainingFn = context.newFunction("__budgetRemaining", () =>
+    context.newNumber(p.budget.remaining()),
+  );
+  context.setProp(context.global, "__budgetRemaining", remainingFn);
+  remainingFn.dispose();
 }
 
 export async function runWorkflowScript(
