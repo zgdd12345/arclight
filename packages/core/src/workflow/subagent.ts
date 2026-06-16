@@ -8,6 +8,7 @@ import type {
   ProviderToolSchema,
   ToolRegistryLike,
 } from "../loop/types";
+import { jsonSchemaToZod, makeStructuredOutputTool } from "./schema";
 // 共享契约类型自 M0 单一权威来源；subagent.ts 绝不本地重声明 AgentSpec/SubagentResult/WorkflowContext。
 import type { AgentSpec, SubagentResult, WorkflowContext } from "./types";
 
@@ -82,7 +83,17 @@ export async function runSubagent(spec: AgentSpec, ctx: WorkflowContext): Promis
   const signal = AbortSignal.any([ctx.signal, childAc.signal]);
 
   const allow = spec.tools ?? defaultSafeToolNames(ctx.registry);
-  const registry = new RestrictedToolRegistry(ctx.registry, allow);
+  let captured: unknown;
+  const extra: Tool<unknown, unknown>[] = [];
+  if (spec.schema) {
+    const zodSchema = jsonSchemaToZod(spec.schema);
+    extra.push(
+      makeStructuredOutputTool(zodSchema, (data) => {
+        captured = data;
+      }),
+    );
+  }
+  const registry = new RestrictedToolRegistry(ctx.registry, allow, extra);
 
   const messages: LlmMessage[] = [
     { role: "system", content: defaultRolePrompt(spec) },
@@ -105,6 +116,16 @@ export async function runSubagent(spec: AgentSpec, ctx: WorkflowContext): Promis
     let r = await gen.next();
     while (!r.done) r = await gen.next();
     if (r.value.status !== "completed") return { ok: false, status: r.value.status };
+    if (spec.schema) {
+      if (captured === undefined) {
+        return {
+          ok: false,
+          status: "failed",
+          error: "subagent finished without calling StructuredOutput",
+        };
+      }
+      return { ok: true, value: captured as Record<string, unknown> };
+    }
     return { ok: true, value: finalAssistantText(state.messages) };
   } finally {
     childAc.abort(); // 释放 AbortSignal.any 监听器
