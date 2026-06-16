@@ -7,7 +7,9 @@ import {
   type Budget,
   type RunSubagent,
   type SpecResult,
+  type StageSpec,
   validateAgentSpec,
+  validateStageSpec,
   WorkflowApiError,
   type WorkflowContext,
   type WorkflowPrimitives,
@@ -54,6 +56,100 @@ export function makeParallel(scheduler: Scheduler, runSubagentFn: RunSubagent) {
       ),
     );
   };
+}
+
+/**
+ * pipeline：无 barrier 流水线。每个 item 独立穿过 stages（item 间并发，受调度池限流）；
+ * 某 stage 失败/抛错 → 该 item 落 null 并跳过其余 stage（per-item 隔离）。
+ * stage.prompt 的 ${prev}/${item}/${index} 由宿主声明式插值（path-get，无 guest 再入，符合 §2.1）。
+ */
+export function makePipeline(scheduler: Scheduler, runSubagentFn: RunSubagent) {
+  return async function pipeline(
+    items: unknown[],
+    ...stages: StageSpec[]
+  ): Promise<(SpecResult | null)[]> {
+    if (!Array.isArray(items)) {
+      throw new WorkflowApiError("pipeline(items, ...stages): items must be an array");
+    }
+    if (stages.length === 0) {
+      throw new WorkflowApiError("pipeline requires at least one stage");
+    }
+    // validateStageSpec 同步校验（闭包守卫 + 空 prompt）——异常在 Promise.all 前同步抛出
+    const validated = stages.map((st, i) => validateStageSpec(st, `pipeline.stage[${i}]`));
+    return Promise.all(
+      items.map((item, index) =>
+        runItemThroughStages(scheduler, runSubagentFn, validated, item, index),
+      ),
+    );
+  };
+}
+
+async function runItemThroughStages(
+  scheduler: Scheduler,
+  runSubagentFn: RunSubagent,
+  stages: StageSpec[],
+  item: unknown,
+  index: number,
+): Promise<SpecResult | null> {
+  let prev: SpecResult | null = null;
+  for (const stage of stages) {
+    const prompt = interpolate(stage.prompt, { item, index, prev });
+    // exactOptionalPropertyTypes: only spread keys that are defined
+    const spec: AgentSpec = {
+      prompt,
+      ...(stage.schema !== undefined ? { schema: stage.schema } : {}),
+      ...(stage.tools !== undefined ? { tools: stage.tools } : {}),
+      ...(stage.model !== undefined ? { model: stage.model } : {}),
+    };
+    try {
+      const r = await scheduler.submit((signal) => runSubagentFn(spec, signal));
+      if (!r.ok) return null; // stage 失败 → item 落 null，跳过其余 stage（不读 status）
+      prev = r.value;
+    } catch (e) {
+      if (isFatal(e)) throw e; // 中断 / budget / backstop 冒泡，不被吞
+      return null; // stage 意外抛 → item 落 null
+    }
+  }
+  return prev;
+}
+
+// ── 声明式插值：仅 ${prev|item|index} 的点路径取值，不支持任意表达式（spec §15）──
+const SEGMENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * 将 template 中的 `${...}` 占位符替换为 scope 中对应的值。
+ * 仅支持点路径取值（`${item}`、`${index}`、`${prev.field}`）；
+ * 拒绝任意表达式，undefined 取值抛 WorkflowApiError。
+ */
+export function interpolate(
+  template: string,
+  scope: { item: unknown; index: number; prev: SpecResult | null },
+): string {
+  return template.replace(/\$\{([^}]*)\}/g, (_match, raw: string) => {
+    const path = raw.trim();
+    if (path.length === 0) {
+      throw new WorkflowApiError("pipeline interpolation: empty placeholder (${...})");
+    }
+    const value = resolvePath(path, scope as unknown as Record<string, unknown>);
+    if (value === undefined) {
+      throw new WorkflowApiError(`pipeline interpolation: "\${${path}}" resolved to undefined`);
+    }
+    return typeof value === "string" ? value : JSON.stringify(value);
+  });
+}
+
+function resolvePath(path: string, root: Record<string, unknown>): unknown {
+  let cur: unknown = root;
+  for (const seg of path.split(".")) {
+    if (!SEGMENT_RE.test(seg)) {
+      throw new WorkflowApiError(
+        `pipeline interpolation: invalid segment "${seg}" — only \${prev|item|index} dotted paths allowed (no expressions, spec §15)`,
+      );
+    }
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
 }
 
 // M1 边界：parallel/pipeline/workflow 的调度实现属 M2（scheduler），向 guest 注入属 M6。
