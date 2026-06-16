@@ -116,6 +116,60 @@ export const InterruptedSchema = z.object({
   reason: z.enum(["user", "abort"]),
 });
 
+// ── workflow.*（spec §8）：编排生命周期事件。走 appendEvent+bus 旁路（不混入主 turn 叙事流），
+// 与 tool.progress 同一持久化+扇出路径。workflowId = workflow_runs.id（runId）。append-only。
+//
+// 字面量同源于 spec §8；core 侧（workflow/events.ts）经 M0 常量 WORKFLOW_EVENTS 单点引用。
+// 本包不能反向 import core 的 types.ts（依赖方向 core→@arclight/protocol，本包零 @arclight 依赖，
+// index.ts:2），故此处保留权威 wire 字面量，由 §8 schema 测试 + core 发射器 ArcEventSchema 复核双向钉死。
+export const WorkflowStartedSchema = z.object({
+  ...base,
+  t: z.literal("workflow.started"),
+  workflowId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const WorkflowPhaseSchema = z.object({
+  ...base,
+  t: z.literal("workflow.phase"),
+  workflowId: z.string().min(1),
+  title: z.string().min(1),
+});
+
+export const WorkflowAgentStartedSchema = z.object({
+  ...base,
+  t: z.literal("workflow.agent.started"),
+  workflowId: z.string().min(1),
+  agentId: z.string().min(1), // = workflow_agents.id
+  role: z.string().min(1), // AgentSpec.label/role
+  // 序号字段名 = agentSeq（非 seq）：信封 seq 由 appendEvent 单点分配
+  // （DraftEvent = Omit<ArcEvent,"seq"|"ts"|"epoch">），payload 不得再声明 seq（契约 M0 §11）。
+  agentSeq: z.number().int().nonnegative(),
+});
+
+export const WorkflowAgentCompletedSchema = z.object({
+  ...base,
+  t: z.literal("workflow.agent.completed"),
+  workflowId: z.string().min(1),
+  agentId: z.string().min(1),
+  status: z.enum(["ok", "failed"]),
+});
+
+export const WorkflowCompletedSchema = z.object({
+  ...base,
+  t: z.literal("workflow.completed"),
+  workflowId: z.string().min(1),
+});
+
+// 中断与顶层 throw 共用本事件，reason 区分（spec §10）：run 置 interrupted / failed
+export const WorkflowFailedSchema = z.object({
+  ...base,
+  t: z.literal("workflow.failed"),
+  workflowId: z.string().min(1),
+  reason: z.enum(["error", "interrupted"]),
+  message: z.string(),
+});
+
 // Wire 宽容信封（forward-compat 的另一半契约）：服务端先于客户端升级时会出现本版本
 // 未知的 `t`——只要 base 信封合法就必须被接受并推进 maxSeq/epoch，由 reducer 静默忽略；
 // 若消费端直接丢弃，重连 afterSeq 会停在未知事件之前，无限重放重丢。
@@ -138,6 +192,12 @@ export const ArcEventSchema = z.discriminatedUnion("t", [
   TurnCompletedSchema,
   SessionErrorSchema,
   InterruptedSchema,
+  WorkflowStartedSchema, // append only（spec §8）
+  WorkflowPhaseSchema,
+  WorkflowAgentStartedSchema,
+  WorkflowAgentCompletedSchema,
+  WorkflowCompletedSchema,
+  WorkflowFailedSchema,
 ]);
 export type ArcEvent = z.infer<typeof ArcEventSchema>;
 export type ArcEventType = ArcEvent["t"];
