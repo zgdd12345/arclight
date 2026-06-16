@@ -11,10 +11,12 @@ import { makeJournaledRun, type RunOneSpec } from "../journaled-run";
 import { ResumePlanner } from "../resume";
 
 // 确定性 runLive：结果只由 spec 决定（模拟 guest 内 Date/random 已被 M6 runtime 桩死，spec §7 前提）。
-const deterministicRun = (counter: { n: number }): RunOneSpec => async (spec) => {
-  counter.n++;
-  return { for: (spec as { prompt: string }).prompt };
-};
+const deterministicRun =
+  (counter: { n: number }): RunOneSpec =>
+  async (spec) => {
+    counter.n++;
+    return { for: (spec as { prompt: string }).prompt };
+  };
 
 const SCRIPT = "agent('a'); agent('b'); agent('c');";
 const ARGS = { seed: 7 };
@@ -27,7 +29,9 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arclight-wf-e2e-"));
   const { dbPath } = runMigrations(join(dir, ".arclight"));
   ({ db, sqlite } = createDb(dbPath));
-  db.insert(workspaces).values({ id: "w1", name: "t", repoPath: "/r", arclightDir: "/r/.arclight" }).run();
+  db.insert(workspaces)
+    .values({ id: "w1", name: "t", repoPath: "/r", arclightDir: "/r/.arclight" })
+    .run();
   db.insert(sessions).values({ id: "s1", workspaceId: "w1" }).run();
 });
 afterEach(() => {
@@ -65,8 +69,12 @@ describe("journal + resume 端到端 (spec §14)", () => {
 
     const prior = j.findResumableRun(scriptHash(SCRIPT), argsHash(ARGS));
     expect(prior).not.toBeNull();
-    // biome-ignore lint/style/noNonNullAssertion: asserted non-null by expect() above
-    const replay = await driveRun(j, ["a", "b", "c"], new ResumePlanner(j.loadJournal(prior!.runId)));
+    const replay = await driveRun(
+      j,
+      ["a", "b", "c"],
+      // biome-ignore lint/style/noNonNullAssertion: asserted non-null by expect() above
+      new ResumePlanner(j.loadJournal(prior!.runId)),
+    );
     expect(replay.hits).toBe(3);
     expect(replay.live).toBe(0);
     expect(replay.results).toEqual(first.results); // 确定性：重放结果逐位等于首跑
@@ -78,7 +86,11 @@ describe("journal + resume 端到端 (spec §14)", () => {
     // biome-ignore lint/style/noNonNullAssertion: first run just completed, prior is guaranteed non-null
     const prior = j.findResumableRun(scriptHash(SCRIPT), argsHash(ARGS))!;
 
-    const changed = await driveRun(j, ["a", "B-CHANGED", "c"], new ResumePlanner(j.loadJournal(prior.runId)));
+    const changed = await driveRun(
+      j,
+      ["a", "B-CHANGED", "c"],
+      new ResumePlanner(j.loadJournal(prior.runId)),
+    );
     expect(changed.hits).toBe(1); // seq0 命中
     expect(changed.live).toBe(2); // seq1（变更）+ seq2（尾部失效）live
     expect(changed.results[0]).toEqual({ for: "a" });

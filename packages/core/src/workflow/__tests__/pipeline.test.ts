@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: intentional ${...} test inputs for interpolate()
 import { describe, expect, test } from "bun:test";
 import { interpolate, makePipeline, WorkflowApiError } from "../primitives";
 import { Scheduler } from "../scheduler";
@@ -29,16 +30,12 @@ describe("interpolate", () => {
       WorkflowApiError,
     );
   });
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test inputs
   test("__proto__ 顶层段被拒（own-property guard）", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
     expect(() => interpolate("${__proto__}", { item: "x", index: 0, prev: null })).toThrow(
       WorkflowApiError,
     );
   });
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
   test("item.__proto__ 嵌套段被拒（own-property guard）", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
     expect(() =>
       interpolate("${item.__proto__}", { item: { a: 1 }, index: 0, prev: null }),
     ).toThrow(WorkflowApiError);
