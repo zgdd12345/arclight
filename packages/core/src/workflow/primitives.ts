@@ -5,6 +5,7 @@ import { runSubagent } from "./subagent";
 import {
   type AgentSpec,
   type Budget,
+  type CallKind,
   type RunSubagent,
   type SpecResult,
   type StageSpec,
@@ -165,20 +166,58 @@ function notUntilM6(name: string): () => never {
 // budget no-op：M2 TokenBudget 实现真实计量；M1 仅占位（spent/remaining 恒 0）。
 const noopBudget: Budget = { total: 0, spent: () => 0, remaining: () => 0 };
 
-export function makeWorkflowPrimitives(ctx: WorkflowContext, args: unknown): WorkflowPrimitives {
+/**
+ * M6 装配接缝：createWorkflowRuntime 注入真实调度/记账/journaling/事件。
+ *  - scheduler：M2 并发池（budget 准入 + backstop + abort）。
+ *  - run：journaling + workflow.* 事件 + budget 计费 + cwd 隔离的 RunSubagent（Task 4 装配）。
+ *  - workflow：一层内联子 workflow（Task 4）。
+ *  - budget：guest 可见的只读视图（M2 TokenBudget）。
+ *  - bindSeqs：parallel 调度前同步按数组序预分配连续 seq（resume 确定性，asyncify 安全）。
+ */
+export type PrimitiveWiring = {
+  scheduler: Scheduler;
+  run: RunSubagent;
+  workflow: WorkflowPrimitives["workflow"];
+  budget: Budget;
+  bindSeqs: (specs: AgentSpec[], callKind: CallKind) => void;
+};
+
+export function makeWorkflowPrimitives(
+  ctx: WorkflowContext,
+  args: unknown,
+  wiring?: PrimitiveWiring,
+): WorkflowPrimitives {
   return {
     args,
     log: (msg) => ctx.onLog?.(msg),
     phase: (title) => ctx.onPhase?.(title),
     agent: async (prompt, opts) => {
       const spec: AgentSpec = { prompt, ...(opts ?? {}) };
-      const res = await runSubagent(spec, ctx);
-      // 失败 → null（spec §10；guest 可 .filter(Boolean)）；成功 → 统一 value（无 text/data 二分）。
-      return res.ok ? res.value : null;
+      if (!wiring) {
+        // M1 顺序路径：直接嵌套 queryLoop（无池/无 journal），成功→value，失败→null（spec §10）。
+        const res = await runSubagent(spec, ctx);
+        return res.ok ? res.value : null;
+      }
+      validateAgentSpec(spec, "agent");
+      wiring.bindSeqs([spec], "agent"); // 单调 seq（agent 调用序）
+      const r = await wiring.scheduler.submit((signal) => wiring.run(spec, signal));
+      return r.ok ? r.value : null;
     },
-    parallel: notUntilM6("parallel"),
-    pipeline: notUntilM6("pipeline"),
-    workflow: notUntilM6("workflow"),
-    budget: noopBudget,
+    parallel: wiring
+      ? async (specs) => {
+          if (!Array.isArray(specs)) {
+            throw new WorkflowApiError("parallel(specs): specs must be an array of AgentSpec");
+          }
+          // 同步校验 + seq 预分配（数组序），再交 makeParallel（其内再校验幂等、回灌同引用规格）。
+          const validated = specs.map((s, i) => validateAgentSpec(s, `parallel[${i}]`));
+          wiring.bindSeqs(validated, "parallel-item");
+          return makeParallel(wiring.scheduler, wiring.run)(validated);
+        }
+      : notUntilM6("parallel"),
+    pipeline: wiring
+      ? async (items, ...stages) => makePipeline(wiring.scheduler, wiring.run)(items, ...stages)
+      : notUntilM6("pipeline"),
+    workflow: wiring?.workflow ?? notUntilM6("workflow"),
+    budget: wiring?.budget ?? noopBudget,
   };
 }
