@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WORKFLOW_NAME_RE, WorkflowStore } from "../store";
+import { resolveWorkflowSource, WORKFLOW_NAME_RE, WorkflowStore } from "../store";
 
 const dirs: string[] = [];
 function freshDir(): string {
@@ -71,5 +71,25 @@ describe("WorkflowStore：命名 workflow 加载/保存（spec §3 store.ts, §1
   test("save 空源码被拒", () => {
     const store = new WorkflowStore(freshDir());
     expect(() => store.save("ok", "")).toThrow(/non-empty/);
+  });
+});
+
+describe("resolveWorkflowSource（M6 解析收口）", () => {
+  test("slug 名称存在于 store → 返回已保存的源码", () => {
+    const store = new WorkflowStore(freshDir());
+    const src = "phase('plan'); const r = await agent('run'); return r;";
+    store.save("my-flow", src);
+    expect(resolveWorkflowSource("my-flow", store)).toBe(src);
+  });
+
+  test("slug 名称不在 store → 抛 no such named workflow", () => {
+    const store = new WorkflowStore(freshDir());
+    expect(() => resolveWorkflowSource("missing-flow", store)).toThrow(/no such named workflow/);
+  });
+
+  test("内联脚本（非 slug，含分号/括号）→ 原样返回", () => {
+    const store = new WorkflowStore(freshDir());
+    const inline = "const x = agent('hi'); return x;";
+    expect(resolveWorkflowSource(inline, store)).toBe(inline);
   });
 });

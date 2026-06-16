@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { scriptHash } from "./hash";
 // 共享类型一律 import 自 M0 唯一权威 ./types（不本地重声明）。
 import type { LoadedWorkflow, WorkflowStorePort } from "./types";
 
@@ -25,9 +26,9 @@ export class WorkflowStore implements WorkflowStorePort {
     this.dir = join(arclightDir, "workflows");
   }
 
-  /** scriptHash：M3 resume 缓存键的一半（另一半是 args，spec §7）。取全 64 位 hex 防碰撞误命中。 */
+  /** scriptHash：M3 resume 缓存键的一半（另一半是 args，spec §7）。委托给 hash.ts 规范实现保证唯一性。 */
   static hashScript(source: string): string {
-    return createHash("sha256").update(source, "utf8").digest("hex");
+    return scriptHash(source);
   }
 
   private assertName(name: string): void {
@@ -85,8 +86,11 @@ export class WorkflowStore implements WorkflowStorePort {
 export function resolveWorkflowSource(scriptOrName: string, store: WorkflowStore): string {
   const candidate = scriptOrName.trim();
   if (WORKFLOW_NAME_RE.test(candidate)) {
-    if (!store.has(candidate)) throw new Error(`no such named workflow: ${candidate}`);
-    return store.load(candidate).source;
+    try {
+      return store.load(candidate).source;
+    } catch {
+      throw new Error(`no such named workflow: ${candidate}`);
+    }
   }
   return scriptOrName;
 }
