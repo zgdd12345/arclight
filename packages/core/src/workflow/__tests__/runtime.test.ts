@@ -84,4 +84,25 @@ describe("workflow runtime (QuickJS asyncify)", () => {
     expect(res.status).toBe("failed");
     expect((res as { error: string }).error).toContain("boom");
   });
+
+  test("agent returning a plain string round-trips", async () => {
+    const res = await runWorkflowScript(
+      `agent("x")`,
+      stubPrimitives({ agent: async () => "hello" }),
+    );
+    expect(res).toEqual({ status: "completed", output: "hello" });
+  });
+
+  test("host agent rejection is normalized to a structured failure", async () => {
+    const res = await runWorkflowScript(
+      `agent("hello")`,
+      stubPrimitives({
+        agent: async () => {
+          throw new Error("LLM unavailable");
+        },
+      }),
+    );
+    expect(res.status).toBe("failed");
+    expect((res as { error: string }).error).toContain("LLM unavailable");
+  });
 });

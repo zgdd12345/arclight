@@ -6,12 +6,17 @@ import {
   type QuickJSHandle,
 } from "quickjs-emscripten";
 // 共享契约类型自 M0 单一权威来源；runtime.ts 绝不本地重声明。
-import type { RunScriptResult, WorkflowPrimitives } from "./types";
+import type { AgentSpec, RunScriptResult, WorkflowPrimitives } from "./types";
 
 // 异步 wasm 模块按进程缓存：asyncify 变体加载一次复用（与 provider-manager 单例同构）。
 let modulePromise: Promise<QuickJSAsyncWASMModule> | undefined;
 function getAsyncModule(): Promise<QuickJSAsyncWASMModule> {
-  if (!modulePromise) modulePromise = newQuickJSAsyncWASMModuleFromVariant(variant);
+  if (!modulePromise) {
+    modulePromise = newQuickJSAsyncWASMModuleFromVariant(variant);
+    modulePromise.catch(() => {
+      modulePromise = undefined;
+    });
+  }
   return modulePromise;
 }
 
@@ -60,7 +65,7 @@ function installPrimitives(context: QuickJSAsyncContext, p: WorkflowPrimitives):
     const prompt = context.getString(promptH);
     const optsJson = context.getString(optsH); // guest 始终传 JSON 字符串
     const opts =
-      optsJson === "null" ? undefined : (JSON.parse(optsJson) as Record<string, unknown>);
+      optsJson === "null" ? undefined : (JSON.parse(optsJson) as Omit<AgentSpec, "prompt">);
     const result = await p.agent(prompt, opts);
     return context.newString(JSON.stringify(result ?? null));
   });
@@ -79,6 +84,7 @@ export async function runWorkflowScript(
   const context = mod.newContext();
   try {
     installPrimitives(context, primitives);
+    // PRELUDE failure is a programming error and intentionally propagates rather than normalizing to {status:"failed"}.
     // 注入序 + 确定性桩：同步 eval（无 await）。prelude 为可信代码。
     context.unwrapResult(context.evalCode(PRELUDE)).dispose();
 
