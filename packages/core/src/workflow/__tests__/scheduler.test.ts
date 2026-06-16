@@ -113,4 +113,26 @@ describe("Scheduler", () => {
     expect(n).toBeGreaterThanOrEqual(1);
     expect(n).toBeLessThanOrEqual(16);
   });
+
+  test("task 抛错时 permit 正确释放，后续任务可进入", async () => {
+    const s = new Scheduler({ signal: liveSignal(), maxConcurrent: 1 });
+    await expect(
+      s.submit(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    const result = await s.submit(async () => "ok");
+    expect(result).toBe("ok");
+  });
+
+  test("submit 把 signal 传给 task", async () => {
+    const sig = liveSignal();
+    const s = new Scheduler({ signal: sig });
+    let received: AbortSignal | undefined;
+    await s.submit(async (signal) => {
+      received = signal;
+      return 0;
+    });
+    expect(received).toBe(sig);
+  });
 });
