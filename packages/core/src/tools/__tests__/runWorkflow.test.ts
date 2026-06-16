@@ -94,6 +94,18 @@ describe("run_workflow 工具：临场合成入口（spec §1/§12.5/§14）", (
     }
   });
 
+  test("name 非 slug（含空格/大写）→ zod 边界 VALIDATION（可重试，非 EXEC_FAILED）", async () => {
+    const { runtime } = spyRuntime();
+    const store = freshStore();
+    const execute = makeExecuteTool({ sandbox: {} as never, workflows: { store, runtime } });
+    const out = await execute(tool, { name: "Invalid Name" }, ctx(new AbortController().signal));
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.envelope.error_class).toBe("VALIDATION");
+      expect(out.envelope.retry_allowed).toBe(true);
+    }
+  });
+
   test("同时给 name 和 script → schema refine 拒绝（VALIDATION）", async () => {
     const { runtime } = spyRuntime();
     const store = freshStore();

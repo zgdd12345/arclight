@@ -1,7 +1,7 @@
 import type { Tool } from "@arclight/protocol";
 import { z } from "zod";
 import type { WorkflowResult } from "../../workflow";
-import { resolveWorkflowSource } from "../../workflow";
+import { resolveWorkflowSource, WORKFLOW_NAME_RE } from "../../workflow";
 import { type CoreToolContext, ToolExecError } from "../registry";
 
 export const RUN_WORKFLOW_TOOL_NAME = "run_workflow";
@@ -9,7 +9,11 @@ export const RUN_WORKFLOW_TOOL_NAME = "run_workflow";
 // 恰好二选一：name(跑已存 workflow) | script(临场合成内联源码)；saveAs 仅在 script 下命名复用。
 const Input = z
   .object({
-    name: z.string().min(1).optional(),
+    name: z
+      .string()
+      .min(1)
+      .regex(WORKFLOW_NAME_RE, "workflow name must match [a-z0-9][a-z0-9-]{0,63}")
+      .optional(),
     script: z.string().min(1).optional(),
     saveAs: z.string().min(1).optional(),
     args: z.record(z.string(), z.unknown()).optional(),
