@@ -29,6 +29,26 @@ describe("interpolate", () => {
       WorkflowApiError,
     );
   });
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test inputs
+  test("__proto__ 顶层段被拒（own-property guard）", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
+    expect(() => interpolate("${__proto__}", { item: "x", index: 0, prev: null })).toThrow(
+      WorkflowApiError,
+    );
+  });
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
+  test("item.__proto__ 嵌套段被拒（own-property guard）", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional test input
+    expect(() =>
+      interpolate("${item.__proto__}", { item: { a: 1 }, index: 0, prev: null }),
+    ).toThrow(WorkflowApiError);
+  });
+  test("空占位符 ${} 抛 WorkflowApiError", () => {
+    expect(() => interpolate("${}", { item: "x", index: 0, prev: null })).toThrow(WorkflowApiError);
+  });
+  test("回归：${index}=0（falsy own 值）正常插值为 '0'", () => {
+    expect(interpolate("#${index}", { item: "x", index: 0, prev: null })).toBe("#0");
+  });
 });
 
 describe("pipeline", () => {

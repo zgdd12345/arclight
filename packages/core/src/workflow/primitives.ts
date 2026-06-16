@@ -128,7 +128,7 @@ export function interpolate(
   return template.replace(/\$\{([^}]*)\}/g, (_match, raw: string) => {
     const path = raw.trim();
     if (path.length === 0) {
-      throw new WorkflowApiError("pipeline interpolation: empty placeholder (${...})");
+      throw new WorkflowApiError(`pipeline interpolation: empty placeholder (\${...})`);
     }
     const value = resolvePath(path, scope as unknown as Record<string, unknown>);
     if (value === undefined) {
@@ -146,7 +146,8 @@ function resolvePath(path: string, root: Record<string, unknown>): unknown {
         `pipeline interpolation: invalid segment "${seg}" — only \${prev|item|index} dotted paths allowed (no expressions, spec §15)`,
       );
     }
-    if (cur === null || typeof cur !== "object") return undefined;
+    if (cur === null || typeof cur !== "object" || !Object.hasOwn(cur as object, seg))
+      return undefined;
     cur = (cur as Record<string, unknown>)[seg];
   }
   return cur;
