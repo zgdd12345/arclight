@@ -109,6 +109,7 @@ export async function runSubagent(spec: AgentSpec, ctx: WorkflowContext): Promis
     signal,
     maxRetries: ctx.maxRetries ?? 3,
     maxReflections: ctx.maxReflections ?? 3,
+    ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
   };
 
   try {

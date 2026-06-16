@@ -177,6 +177,9 @@ export type WorkflowContext = {
   // 同步进度原语出口（phase / log）
   onPhase?: (title: string) => void;
   onLog?: (msg: string) => void;
+  /** usage 回传钩子（M6 接线）：subagent queryLoop 每轮 provider usage 经此回传；
+   *  createWorkflowRuntime 接 budget.charge(input+output)（spec §6 token budget 记账）。 */
+  onUsage?: LoopDeps["onUsage"];
 
   // run 编排所需（M3/M5/M6）；M1/M2 不提供，M6 装配时注入
   store?: WorkflowStorePort;
