@@ -299,3 +299,65 @@ export const memories = sqliteTable(
   },
   (t) => [index("memories_enabled_idx").on(t.enabled)],
 );
+
+// ── workflow_runs ────────────────────────────────────────────────────────────
+// 一次 workflow 脚本执行；(scriptHash, argsHash) 唯一确定一个可 resume 的逻辑 run。
+export const workflowRuns = sqliteTable(
+  "workflow_runs",
+  {
+    id: text("id").primaryKey(), // runId = randomUUID()
+    tenantId: text("tenant_id").notNull().default("local"),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    scriptHash: text("script_hash").notNull(), // resume 主键之一（脚本源指纹）
+    argsHash: text("args_hash").notNull(), // resume 主键之二（入参指纹）
+    args: text("args", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    // 镜像 M0 PersistedRunStatus = RunStatus("completed"|"failed"|"interrupted") + "running"。禁用 "cancelled"。
+    status: text("status", {
+      enum: ["running", "completed", "failed", "interrupted"],
+    })
+      .notNull()
+      .default("running"),
+    error: text("error"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  (t) => [
+    index("workflow_runs_session_idx").on(t.sessionId),
+    index("workflow_runs_resume_idx").on(t.scriptHash, t.argsHash),
+  ],
+);
+
+// ── workflow_agents ──────────────────────────────────────────────────────────
+// run 内每次原语调用（agent / parallel 单项 / pipeline 单项）的 journal 行。
+// (seq, specHash) 是 spec §7 的 prefix-cache 键；seq 在 run 内单调唯一。
+export const workflowAgents = sqliteTable(
+  "workflow_agents",
+  {
+    id: text("id").primaryKey(), // randomUUID()
+    tenantId: text("tenant_id").notNull().default("local"),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(), // run 内单调调用序（并行项按规格数组序取连续 seq）
+    callKind: text("call_kind", {
+      enum: ["agent", "parallel-item", "pipeline-item"], // 镜像 M0 CallKind
+    }).notNull(),
+    specHash: text("spec_hash").notNull(), // 该调用规格指纹（逐调用缓存命中键）
+    // 镜像 M0 AgentStatus = "running"|"completed"|"failed"。
+    status: text("status", { enum: ["running", "completed", "failed"] })
+      .notNull()
+      .default("running"),
+    resultJson: text("result_json", { mode: "json" }).$type<unknown>(), // 结构化/文本结果，resume 重放载荷
+    subTurnId: text("sub_turn_id").references(() => turns.id, { onDelete: "set null" }), // 子 agent turn（审计下钻 §8）
+    error: text("error"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    uniqueIndex("workflow_agents_run_seq_uq").on(t.runId, t.seq),
+    index("workflow_agents_run_status_idx").on(t.runId, t.status),
+  ],
+);
