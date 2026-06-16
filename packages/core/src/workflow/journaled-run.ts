@@ -1,7 +1,6 @@
 import { specHash as computeSpecHash } from "./hash";
-import type { WorkflowJournalService } from "./journal-service";
 import type { ResumePlanner } from "./resume";
-import type { CallKind } from "./types";
+import type { CallKind, WorkflowJournalPort } from "./types";
 
 export type RunCtx = { seq: number; callKind: CallKind };
 
@@ -12,7 +11,7 @@ export type RunCtx = { seq: number; callKind: CallKind };
 export type RunOneSpec = (spec: unknown, ctx: RunCtx) => Promise<unknown>;
 
 export type JournaledRunDeps = {
-  journal: WorkflowJournalService;
+  journal: WorkflowJournalPort;
   runId: string;
   planner: ResumePlanner; // 全新 run 传 new ResumePlanner([])；resume 传 prior journal
   runLive: RunOneSpec;
