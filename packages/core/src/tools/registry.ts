@@ -7,13 +7,19 @@ import type {
   ProviderToolSchema,
 } from "../loop/types";
 import type { SandboxService } from "../sandbox/service";
+import type { WorkflowRuntime, WorkflowStore } from "../workflow";
 
 // ToolRegistry：元数据注册 + schemas 投影（绝不带 execute——工具执行 0% 交 AI SDK）。
 // makeExecuteTool：单工具执行壳——zod 校验 / 超时 / 取消 / 输出投影（>32KB spill），永不 throw。
 
 /** 工具执行上下文：LoopToolContext + 注入件（sandbox 等）。
  * 注：protocol ToolContext 的完整对齐（capability/emit 全量）随 U4 审批接线落地。 */
-export type CoreToolContext = LoopToolContext & { sandbox: SandboxService };
+export type CoreToolContext = LoopToolContext & {
+  sandbox: SandboxService;
+  // 注入式 workflow 运行器（M5）：仅主 agent 的 run_workflow 工具消费；子 agent 受限集不含本工具。
+  // runtime 为 M0 契约的 WorkflowRuntime 实例（两参 execute），由 M6 createWorkflowRuntime 产出。
+  workflows?: { store: WorkflowStore; runtime: WorkflowRuntime };
+};
 
 /** 工具抛出此错误可控制 envelope 分类与重试性；其他异常一律 EXEC_FAILED */
 export class ToolExecError extends Error {
@@ -50,6 +56,7 @@ export class ToolRegistry {
 export function makeExecuteTool(deps: {
   sandbox: SandboxService;
   artifacts?: ArtifactStore;
+  workflows?: { store: WorkflowStore; runtime: WorkflowRuntime };
 }): LoopDeps["executeTool"] {
   return async (tool, rawArgs, ctx): Promise<ExecutedToolResult["output"]> => {
     const fail = (
@@ -68,7 +75,11 @@ export function makeExecuteTool(deps: {
       return fail("VALIDATION", `invalid arguments: ${issues}`, true);
     }
 
-    const coreCtx: CoreToolContext = { ...ctx, sandbox: deps.sandbox };
+    const coreCtx: CoreToolContext = {
+      ...ctx,
+      sandbox: deps.sandbox,
+      ...(deps.workflows !== undefined ? { workflows: deps.workflows } : {}),
+    };
     try {
       const out = await withTimeout(
         // 核心工具按 CoreToolContext 实现；protocol ToolContext 全量对齐随 U4
