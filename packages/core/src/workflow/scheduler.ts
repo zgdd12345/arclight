@@ -1,3 +1,5 @@
+import { cpus } from "node:os";
+import { abortError, Semaphore } from "../loop/concurrency";
 import type { Budget } from "./types"; // M0 唯一权威类型源
 
 // ── token budget（跨整个 run 共享记账，硬上限）────────────────────────────────
@@ -50,7 +52,64 @@ export class TokenBudget implements Budget {
   }
 }
 
-// Scheduler 段在 Task 3 追加（与 budget 同文件）：届时在顶部补
-//   import { cpus } from "node:os";
-//   import { Semaphore, abortError } from "../loop/concurrency";
-// 并在文件末尾落地 Scheduler / SchedulerExhaustedError / defaultConcurrency。
+// ── 并发池 + backstop ───────────────────────────────────────────────────────
+export class SchedulerExhaustedError extends Error {
+  constructor(readonly maxAgentsPerRun: number) {
+    super(`workflow run exceeded maxAgentsPerRun backstop (${maxAgentsPerRun})`);
+    this.name = "SchedulerExhaustedError";
+  }
+}
+
+export type SchedulerOpts = {
+  /** run-level 取消信号（沿现有 AbortSignal 链路，spec §10 中断扇出）。 */
+  signal: AbortSignal;
+  /** 并发上限，默认 min(16, cores-2)，下限 1。 */
+  maxConcurrent?: number;
+  /** 单 run 累计 agent 上限（防失控 backstop），默认 256。 */
+  maxAgentsPerRun?: number;
+  /** 共享 token budget（可选）；准入时做硬上限预检。 */
+  budget?: TokenBudget;
+};
+
+/** spec §6：默认并发上限 min(16, cores-2)，下限 1。 */
+export function defaultConcurrency(): number {
+  return Math.max(1, Math.min(16, cpus().length - 2));
+}
+
+export class Scheduler {
+  private readonly sem: Semaphore;
+  private readonly maxAgents: number;
+  private admitted = 0;
+
+  constructor(private readonly opts: SchedulerOpts) {
+    this.sem = new Semaphore(opts.maxConcurrent ?? defaultConcurrency());
+    this.maxAgents = opts.maxAgentsPerRun ?? 256;
+  }
+
+  /** 已准入（含已完成）的 agent 计数（仅供测试/可观测）。 */
+  get admittedCount(): number {
+    return this.admitted;
+  }
+
+  get pending(): number {
+    return this.sem.pending;
+  }
+
+  /**
+   * 提交一个 agent 任务入池排队。准入顺序：abort → backstop → budget → 信号量槽。
+   * abort / backstop / budget 三类为 run-fatal，在 task 运行前抛出（由调用方决定冒泡）。
+   */
+  async submit<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.opts.signal.aborted) throw abortError();
+    if (this.admitted >= this.maxAgents) throw new SchedulerExhaustedError(this.maxAgents);
+    this.opts.budget?.assertAvailable();
+    this.admitted += 1;
+
+    const release = await this.sem.acquire(this.opts.signal);
+    try {
+      return await task(this.opts.signal);
+    } finally {
+      release();
+    }
+  }
+}
