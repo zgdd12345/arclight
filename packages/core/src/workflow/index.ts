@@ -7,7 +7,21 @@
 export { makeWorkflowPrimitives } from "./primitives";
 export { runWorkflowScript } from "./runtime";
 export { jsonSchemaToZod, makeStructuredOutputTool } from "./schema";
+
+// ── M5：命名 workflow 持久层 + 命名/临场合成解析（spec §3） ──
+export { resolveWorkflowSource, WORKFLOW_NAME_RE, WorkflowStore } from "./store";
+
 export { defaultSafeToolNames, RestrictedToolRegistry, runSubagent } from "./subagent";
 
-// 低层 runWorkflowScript 消费者所需的类型别名（权威来源仍是 ./types）。
-export type { RunScriptResult, WorkflowPrimitives } from "./types";
+// 低层 runWorkflowScript 消费者所需的类型别名 + M5 公开面消费的共享类型（M0 唯一权威）。
+// 注：公开入口 runWorkflow(scriptOrName, args, ctx: WorkflowContext) 与 createWorkflowRuntime
+//     由 M6 追加导出——M6 实现体为 createWorkflowRuntime(ctx).execute(resolveWorkflowSource(...), args)。
+export type {
+  LoadedWorkflow,
+  RunScriptResult,
+  WorkflowContext,
+  WorkflowPrimitives,
+  WorkflowResult,
+  WorkflowRuntime,
+  WorkflowStorePort,
+} from "./types";
