@@ -73,6 +73,7 @@ export class AgentRunner {
 
   /** 释放跨 turn 持有的资源（RepoMap 的 SQLite 句柄等）。serve 收尾时调用。 */
   dispose(): void {
+    for (const s of this.deps.sources ?? []) void s.dispose?.();
     for (const rm of this.repoMaps.values()) rm.close();
     this.repoMaps.clear();
   }

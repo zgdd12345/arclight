@@ -22,7 +22,7 @@ export type SessionCtx = {
  *  因此 runner 将片段作 role:"user" 上下文消息注入 LoopState.messages
  *  （与 RepoMap / 记忆注入完全同口径）。 */
 export type PromptFragment = {
-  /** 注入内容（纯文本；Markdown 可用） */
+  /** 注入内容（纯文本；Markdown 可用）。注入方式：role:"user" 上下文消息（非系统提示词——系统提示词由 ProviderManager 单点持有）。 */
   readonly content: string;
   /** 可选调试标签（"skills-list" 等）；runner 不作业务处理 */
   readonly tag?: string;
@@ -38,7 +38,13 @@ export interface ToolSource {
   readonly id: string;
   /** 异步枚举工具列表。MCP source 在此建立连接并拉取 server 工具定义。 */
   list(ctx: SessionCtx): Promise<Tool<unknown, unknown>[]>;
-  /** 可选：向提示词注入片段（skills source 用于渐进披露可用 skill/workflow 清单）。 */
+  /** 可选：向提示词注入片段（skills source 用于渐进披露可用 skill/workflow 清单）。
+   *  调用顺序保证：contribute() 在同一 session/turn 内 list() 之后被调用。
+   *  若实现需在 list() 中做文件系统扫描等探查（如 skills source），应将探查结果缓存至
+   *  实例状态，contribute() 直接读缓存——禁止在 contribute() 内重复执行探查。
+   *  Called AFTER list() within the same session/turn. Implementations that compute fragment
+   *  content from discovery state (e.g. skills scanning the filesystem) should perform
+   *  discovery in list() and cache the result for contribute() to read. */
   contribute?(ctx: SessionCtx): PromptFragment | undefined;
   /** 可选：释放资源（MCP source 在此断连）。 */
   dispose?(): Promise<void>;
@@ -111,8 +117,10 @@ export async function composeSources(
   ctx: SessionCtx,
 ): Promise<ToolRegistry> {
   const reg = new ToolRegistry();
-  for (const source of sources) {
-    const tools = await source.list(ctx);
+  // 并发拉取所有 source 的工具列表（消除 N 个 MCP source 串行建连延迟）。
+  // 按 source 顺序注册结果以维持后来者覆盖（last-wins）语义。
+  const results = await Promise.all(sources.map((s) => s.list(ctx)));
+  for (const tools of results) {
     for (const tool of tools) {
       reg.register(tool);
     }

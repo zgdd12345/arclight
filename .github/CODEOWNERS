@@ -2,3 +2,6 @@
 # All future ToolSource implementations (McpSource, SkillsSource) must be reviewed by the core owner.
 packages/core/src/tools/source.ts @alba
 packages/core/src/tools/__tests__/source.test.ts @alba
+# ToolSource composition + workflow infra (spec §4)
+packages/core/src/loop/ @alba
+packages/core/src/workflow/ @alba

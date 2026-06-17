@@ -215,6 +215,40 @@ describe("composeSources", () => {
   });
 });
 
+// ─── dispose wiring (Fix 1 verification) ─────────────────────────────────────
+// Verifies the runner.dispose() loop pattern: `for (const s of sources) void s.dispose?.()`.
+// Avoids wiring a full AgentRunner (requires db/bus/registry/callProvider) by testing
+// the same dispose-loop pattern that runner.dispose() executes.
+
+describe("source dispose wiring", () => {
+  test("dispose loop increments disposeCount on each FakeSource", async () => {
+    const src1 = new FakeSource({ id: "a" });
+    const src2 = new FakeSource({ id: "b" });
+    const sources: ToolSource[] = [src1, src2];
+    // Replicates runner.dispose(): `for (const s of this.deps.sources ?? []) void s.dispose?.();`
+    // We await here to ensure all Promises settle before asserting.
+    await Promise.all(sources.map((s) => s.dispose?.()));
+    expect(src1.disposeCount).toBe(1);
+    expect(src2.disposeCount).toBe(1);
+  });
+
+  test("dispose loop is safe on sources without dispose() — optional chaining no-ops", async () => {
+    const src: ToolSource = { id: "no-dispose", list: async () => [] };
+    // Must not throw even though dispose is absent
+    await src.dispose?.();
+    // reaching here is the assertion
+    expect(src.dispose).toBeUndefined();
+  });
+
+  test("dispose loop with mixed sources — only disposable sources increment", async () => {
+    const disposable = new FakeSource({ id: "disposable" });
+    const nonDisposable: ToolSource = { id: "no-dispose", list: async () => [] };
+    const sources: ToolSource[] = [disposable, nonDisposable];
+    await Promise.all(sources.map((s) => s.dispose?.()));
+    expect(disposable.disposeCount).toBe(1);
+  });
+});
+
 // ─── collectFragments ─────────────────────────────────────────────────────────
 
 describe("collectFragments", () => {
