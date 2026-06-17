@@ -12,5 +12,8 @@ describe("emitProtocolJsonSchema", () => {
     expect(bundle.$defs.CapabilityProfile).toBeDefined();
     // a representative event
     expect(bundle.$defs.TurnCompleted).toBeDefined();
+    // workflow events added in REGISTRY extension
+    expect(bundle.$defs.WorkflowStarted).toBeDefined();
+    expect(bundle.$defs.WorkflowFailed).toBeDefined();
   });
 });

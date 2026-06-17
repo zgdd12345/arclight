@@ -57,7 +57,9 @@ const REGISTRY: Record<string, z.ZodType> = {
 export function emitProtocolJsonSchema(): Record<string, unknown> {
   const $defs: Record<string, unknown> = {};
   for (const [name, schema] of Object.entries(REGISTRY)) {
-    $defs[name] = z.toJSONSchema(schema, { target: "draft-2020-12" });
+    const raw = z.toJSONSchema(schema, { target: "draft-2020-12" }) as Record<string, unknown>;
+    const { $schema: _discard, ...entry } = raw;
+    $defs[name] = entry;
   }
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",

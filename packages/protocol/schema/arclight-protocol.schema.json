@@ -3,7 +3,6 @@
   "title": "ArclightProtocol",
   "$defs": {
     "ArcCommand": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "oneOf": [
         {
           "type": "object",
@@ -260,7 +259,6 @@
       ]
     },
     "ArcAck": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "oneOf": [
         {
           "type": "object",
@@ -326,7 +324,6 @@
       ]
     },
     "CapabilityProfile": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -375,7 +372,6 @@
       "additionalProperties": false
     },
     "SessionStarted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -420,7 +416,6 @@
       "additionalProperties": false
     },
     "TurnStarted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -467,7 +462,6 @@
       "additionalProperties": false
     },
     "MessageDelta": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -528,7 +522,6 @@
       "additionalProperties": false
     },
     "UserMessage": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -582,7 +575,6 @@
       "additionalProperties": false
     },
     "ThinkingDelta": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -636,7 +628,6 @@
       "additionalProperties": false
     },
     "ToolRequested": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -714,7 +705,6 @@
       "additionalProperties": false
     },
     "ToolProgress": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -776,7 +766,6 @@
       "additionalProperties": false
     },
     "ToolOutput": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -882,7 +871,6 @@
       "additionalProperties": false
     },
     "PermissionAsk": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -975,7 +963,6 @@
       "additionalProperties": false
     },
     "ContextCompacted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1026,7 +1013,6 @@
       "additionalProperties": false
     },
     "TurnCompleted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1082,7 +1068,6 @@
       "additionalProperties": false
     },
     "SessionError": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1169,7 +1154,6 @@
       "additionalProperties": false
     },
     "Interrupted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1224,7 +1208,6 @@
       "additionalProperties": false
     },
     "WorkflowStarted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1279,7 +1262,6 @@
       "additionalProperties": false
     },
     "WorkflowPhase": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1334,7 +1316,6 @@
       "additionalProperties": false
     },
     "WorkflowAgentStarted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1400,7 +1381,6 @@
       "additionalProperties": false
     },
     "WorkflowAgentCompleted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1463,7 +1443,6 @@
       "additionalProperties": false
     },
     "WorkflowCompleted": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
@@ -1513,7 +1492,6 @@
       "additionalProperties": false
     },
     "WorkflowFailed": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "v": {
