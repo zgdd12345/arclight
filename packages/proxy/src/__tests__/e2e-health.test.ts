@@ -39,6 +39,7 @@ async function waitForPython(url: string, timeoutMs = 20000): Promise<void> {
 }
 
 beforeAll(async () => {
+  if (!E2E_AVAILABLE) return;
   py = Bun.spawn(
     [
       "conda", "run", "-n", "arclight",
@@ -62,6 +63,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (!E2E_AVAILABLE) return;
   py?.kill();
   // `conda run` does not propagate signals to its Python grandchild; explicitly
   // kill the uvicorn process by matching the module path so nothing leaks.

@@ -36,10 +36,13 @@ jobs:
           auto-activate-base: false
       - name: Install Python deps
         shell: bash -el {0}
-        run: pip install "pydantic>=2" "pytest>=8" "datamodel-code-generator==0.64.0" "ruff>=0.6" "starlette" "uvicorn" "httpx"
+        run: pip install -e "packages/core-py[dev]"
       - name: Contract drift gate
         shell: bash -el {0}
         run: bun run check:contract
       - name: Python checks
         shell: bash -el {0}
         run: bun run check:py
+      - name: Proxy tests (bun + cross-runtime e2e)
+        shell: bash -el {0}
+        run: cd packages/proxy && bun test
