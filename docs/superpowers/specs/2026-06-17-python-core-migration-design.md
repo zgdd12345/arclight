@@ -94,11 +94,11 @@ opensquilla 作参考与 **Apache-2.0 代码捐赠者**；arclight 在**自有 p
 - **M5 — 切换收尾**：默认全转 Python core;移除老 TS core 与代理;`@arclight/core` 仅剩(或重定位)workflow 服务。
 - **并行**：MCP/skills 借件(§6)可在 M2 起与主线并行(各自 `ToolSource`),**吸收原阶段一**。
 
-## 9. 待定子决策（实现前需拍板，已给默认）
+## 9. 子决策（已拍板 / 默认）
 
-1. **GLM 线**：现状 arclight 走 **Anthropic 兼容**端点;opensquilla provider 走 **OpenAI 兼容**端点(bigmodel `/chat/completions`,工具调用保真度可能更高)。**默认**：随 opensquilla provider 采 OpenAI 兼容线(借件即用);若回归测试发现工具调用退化,保留切回 Anthropic 兼容的适配位。
-2. **sandbox 模型**：arclight 现用 node-pty(交互 TTY);opensquilla 用 subprocess + 命名空间隔离(无 TTY,安全更强)。**默认**：非交互执行采 opensquilla subprocess+bwrap/seatbelt + kill 升级;若确有交互 TTY 需求,补 Python `pty`/`ptyprocess` 路径。
-3. **db 过渡**：**默认**单一 arclight SQLite + drizzle 迁移权威 + Python 裸 SQL 读写 + WAL/`busy_timeout` + 一表一写语言;若切换期写竞争实测不可控,退化为分库 + 只读桥接。
+1. **GLM 线 — 已定：OpenAI 兼容**（2026-06-17 拍板）。随 opensquilla `provider/` 采 OpenAI 兼容端点（bigmodel `/chat/completions`，工具调用保真度更高）。撤销现状的 Anthropic 兼容线;不再保留切回适配位（如未来回归发现退化再议）。
+2. **sandbox 模型 — 已定：subprocess + 命名空间隔离，无交互 TTY**（2026-06-17 拍板，确认 arclight 现有工具无交互 TTY 依赖）。采 opensquilla subprocess + bubblewrap/seatbelt + kill 升级 + `ResourceLimits`;**不**移植 node-pty,不补 Python pty 路径。
+3. **db 过渡 — 默认：单库一表一写**。单一 arclight SQLite + drizzle 迁移权威 + Python 裸 SQL 读写 + WAL/`busy_timeout` + 一表一写语言;若切换期写竞争实测不可控,退化为分库 + 只读桥接。
 
 ## 10. 测试策略
 
