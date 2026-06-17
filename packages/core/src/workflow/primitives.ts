@@ -91,17 +91,35 @@ async function runItemThroughStages(
   stages: StageSpec[],
   item: unknown,
   index: number,
+  preAllocatedSpecs?: AgentSpec[],
 ): Promise<SpecResult | null> {
   let prev: SpecResult | null = null;
-  for (const stage of stages) {
+  for (let si = 0; si < stages.length; si++) {
+    // si is within bounds by loop condition; noUncheckedIndexedAccess requires explicit assertions.
+    // biome-ignore lint/style/noNonNullAssertion: si < stages.length guarantees defined
+    const stage = stages[si]!;
     const prompt = interpolate(stage.prompt, { item, index, prev });
-    // exactOptionalPropertyTypes: only spread keys that are defined
-    const spec: AgentSpec = {
-      prompt,
-      ...(stage.schema !== undefined ? { schema: stage.schema } : {}),
-      ...(stage.tools !== undefined ? { tools: stage.tools } : {}),
-      ...(stage.model !== undefined ? { model: stage.model } : {}),
-    };
+    let spec: AgentSpec;
+    if (preAllocatedSpecs) {
+      // Mutate the pre-bound sentinel so the seqMap lookup (keyed by object identity) resolves
+      // to the correct pre-allocated seq.  Fields absent from this stage are left unset;
+      // each sentinel starts as { prompt } only, so there is no cross-stage contamination.
+      // biome-ignore lint/style/noNonNullAssertion: sentinels.length === stages.length by construction
+      const sentinel = preAllocatedSpecs[si]!;
+      sentinel.prompt = prompt;
+      if (stage.schema !== undefined) sentinel.schema = stage.schema;
+      if (stage.tools !== undefined) sentinel.tools = stage.tools;
+      if (stage.model !== undefined) sentinel.model = stage.model;
+      spec = sentinel;
+    } else {
+      // exactOptionalPropertyTypes: only spread keys that are defined
+      spec = {
+        prompt,
+        ...(stage.schema !== undefined ? { schema: stage.schema } : {}),
+        ...(stage.tools !== undefined ? { tools: stage.tools } : {}),
+        ...(stage.model !== undefined ? { model: stage.model } : {}),
+      };
+    }
     try {
       const r = await scheduler.submit((signal) => runSubagentFn(spec, signal));
       if (!r.ok) return null; // stage 失败 → item 落 null，跳过其余 stage（不读 status）
@@ -215,7 +233,35 @@ export function makeWorkflowPrimitives(
         }
       : notUntilM6("parallel"),
     pipeline: wiring
-      ? async (items, ...stages) => makePipeline(wiring.scheduler, wiring.run)(items, ...stages)
+      ? async (items, ...stages) => {
+          if (!Array.isArray(items)) {
+            throw new WorkflowApiError("pipeline(items, ...stages): items must be an array");
+          }
+          if (stages.length === 0) {
+            throw new WorkflowApiError("pipeline requires at least one stage");
+          }
+          const validated = stages.map((st, i) => validateStageSpec(st, `pipeline.stage[${i}]`));
+          // Pre-allocate one sentinel AgentSpec per (item × stage) slot in item-major order
+          // and synchronously bind them all BEFORE any scheduler.submit.  seqMap in runtime.ts
+          // is keyed by object identity; we mutate each sentinel's prompt (and optional fields)
+          // just before handing it to `run`, so the pre-bound seq travels intact to journaling.
+          const sentinels: AgentSpec[][] = items.map((_, ii) =>
+            validated.map((_, si) => ({ prompt: `__pipeline_sentinel_${ii}_${si}` }) as AgentSpec),
+          );
+          wiring.bindSeqs(sentinels.flat(), "pipeline-item");
+          return Promise.all(
+            items.map((item, index) =>
+              runItemThroughStages(
+                wiring.scheduler,
+                wiring.run,
+                validated,
+                item,
+                index,
+                sentinels[index],
+              ),
+            ),
+          );
+        }
       : notUntilM6("pipeline"),
     workflow: wiring?.workflow ?? notUntilM6("workflow"),
     budget: wiring?.budget ?? noopBudget,
