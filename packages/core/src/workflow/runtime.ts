@@ -17,6 +17,7 @@ import { makeJournaledRun, type RunOneSpec } from "./journaled-run";
 import { makeWorkflowPrimitives, type PrimitiveWiring } from "./primitives";
 import { ResumePlanner } from "./resume";
 import { BudgetExceededError, Scheduler, SchedulerExhaustedError, TokenBudget } from "./scheduler";
+import { resolveWorkflowSource, type WorkflowStore } from "./store";
 import { runSubagent } from "./subagent";
 // 共享契约类型自 M0 单一权威来源；runtime.ts 绝不本地重声明。
 import {
@@ -420,4 +421,17 @@ export function createWorkflowRuntime(ctx: WorkflowContext): WorkflowRuntime {
       };
     },
   };
+}
+
+/**
+ * 公开入口（spec §3 / M0 契约）。scriptOrName：slug → 命名 workflow（从 ctx.store 载入，未存抛错）；
+ * 其余 → 临场合成内联源码（原样）。解析后委托 createWorkflowRuntime(ctx).execute。
+ */
+export async function runWorkflow(
+  scriptOrName: string,
+  args: unknown,
+  ctx: WorkflowContext,
+): Promise<WorkflowResult> {
+  const source = resolveWorkflowSource(scriptOrName, ctx.store as unknown as WorkflowStore);
+  return createWorkflowRuntime(ctx).execute(source, args);
 }
