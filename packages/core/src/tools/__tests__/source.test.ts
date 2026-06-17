@@ -31,7 +31,7 @@ function makeTool(name: string, description = `${name} tool`): Tool<unknown, unk
     inputSchema: z.object({}),
     outputSchema: z.any(),
     execute: async () => ({}),
-  } as Tool<unknown, unknown>;
+  };
 }
 
 function makeCtx(overrides: Partial<SessionCtx> = {}): SessionCtx {

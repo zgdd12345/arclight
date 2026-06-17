@@ -41,10 +41,7 @@ export interface ToolSource {
   /** 可选：向提示词注入片段（skills source 用于渐进披露可用 skill/workflow 清单）。
    *  调用顺序保证：contribute() 在同一 session/turn 内 list() 之后被调用。
    *  若实现需在 list() 中做文件系统扫描等探查（如 skills source），应将探查结果缓存至
-   *  实例状态，contribute() 直接读缓存——禁止在 contribute() 内重复执行探查。
-   *  Called AFTER list() within the same session/turn. Implementations that compute fragment
-   *  content from discovery state (e.g. skills scanning the filesystem) should perform
-   *  discovery in list() and cache the result for contribute() to read. */
+   *  实例状态，contribute() 直接读缓存——禁止在 contribute() 内重复执行探查。 */
   contribute?(ctx: SessionCtx): PromptFragment | undefined;
   /** 可选：释放资源（MCP source 在此断连）。 */
   dispose?(): Promise<void>;
@@ -63,7 +60,7 @@ export class BuiltinSource implements ToolSource {
 
   list(_ctx: SessionCtx): Promise<Tool<unknown, unknown>[]> {
     // 返回浅拷贝：防止外部 mutation 影响内部状态
-    return Promise.resolve(this.tools.slice() as Tool<unknown, unknown>[]);
+    return Promise.resolve(this.tools.slice());
   }
 
   // 无 contribute()：内置工具不向提示词注入额外片段
@@ -93,7 +90,7 @@ export class FakeSource implements ToolSource {
   }
 
   list(_ctx: SessionCtx): Promise<Tool<unknown, unknown>[]> {
-    return Promise.resolve(this._tools.slice() as Tool<unknown, unknown>[]);
+    return Promise.resolve(this._tools.slice());
   }
 
   contribute(_ctx: SessionCtx): PromptFragment | undefined {
@@ -137,10 +134,8 @@ export function collectFragments(
 ): PromptFragment[] {
   const frags: PromptFragment[] = [];
   for (const source of sources) {
-    if (source.contribute !== undefined) {
-      const frag = source.contribute(ctx);
-      if (frag !== undefined) frags.push(frag);
-    }
+    const frag = source.contribute?.(ctx);
+    if (frag !== undefined) frags.push(frag);
   }
   return frags;
 }
