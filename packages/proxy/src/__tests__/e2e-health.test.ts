@@ -11,7 +11,12 @@ function arclightEnvAvailable(): boolean {
   try {
     const probe = Bun.spawnSync(
       ["conda", "run", "-n", "arclight", "python", "-c", "import arclight_core.server.app"],
-      { cwd: repoRoot, env: { ...process.env, PYTHONPATH: `${repoRoot}packages/core-py/src` }, stdout: "ignore", stderr: "ignore" },
+      {
+        cwd: repoRoot,
+        env: { ...process.env, PYTHONPATH: `${repoRoot}packages/core-py/src` },
+        stdout: "ignore",
+        stderr: "ignore",
+      },
     );
     return probe.exitCode === 0;
   } catch {
@@ -19,7 +24,8 @@ function arclightEnvAvailable(): boolean {
   }
 }
 const E2E_AVAILABLE = arclightEnvAvailable();
-if (!E2E_AVAILABLE) console.warn("[e2e-health] skipping: conda env 'arclight' or arclight_core not importable");
+if (!E2E_AVAILABLE)
+  console.warn("[e2e-health] skipping: conda env 'arclight' or arclight_core not importable");
 
 let py: ReturnType<typeof Bun.spawn> | undefined;
 let tsUpstreamServer: ReturnType<typeof Bun.serve> | undefined;
@@ -42,11 +48,18 @@ beforeAll(async () => {
   if (!E2E_AVAILABLE) return;
   py = Bun.spawn(
     [
-      "conda", "run", "-n", "arclight",
-      "python", "-m", "uvicorn",
+      "conda",
+      "run",
+      "-n",
+      "arclight",
+      "python",
+      "-m",
+      "uvicorn",
       "arclight_core.server.app:app",
-      "--port", String(PY_PORT),
-      "--app-dir", "packages/core-py/src",
+      "--port",
+      String(PY_PORT),
+      "--app-dir",
+      "packages/core-py/src",
     ],
     { cwd: repoRoot, stdout: "ignore", stderr: "ignore" },
   );
