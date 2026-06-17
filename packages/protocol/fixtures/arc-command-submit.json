@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "commandId": "cmd-1",
+  "k": "submit",
+  "sessionId": "sess-1",
+  "input": { "text": "hello", "agent": "code", "mode": "chat", "baseEpoch": 0 }
+}
