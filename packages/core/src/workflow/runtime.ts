@@ -36,7 +36,9 @@ import {
   type WorkflowStorePort,
 } from "./types";
 
-// 异步 wasm 模块按进程缓存：asyncify 变体加载一次复用（与 provider-manager 单例同构）。
+// 异步 WASM 模块按进程缓存：仅用于快速加载二进制（避免重复网络/磁盘读取）。
+// 每次 run 从缓存模块创建独立 context（见 runWorkflowScript freshModule:true），
+// 不共享 asyncify 挂起栈——缓存单例不参与执行上下文。
 let modulePromise: Promise<QuickJSAsyncWASMModule> | undefined;
 function getAsyncModule(): Promise<QuickJSAsyncWASMModule> {
   if (!modulePromise) {
@@ -174,10 +176,10 @@ export async function runWorkflowScript(
   primitives: WorkflowPrimitives,
   opts?: { freshModule?: boolean },
 ): Promise<RunScriptResult> {
-  // 嵌套 workflow() 在父 guest asyncify 挂起期内运行；asyncify 的 suspend/resume 栈是 WASM 实例级
-  // （ASYNCIFY_STACK_SIZE 为模块全局），共用进程缓存模块的嵌套 run 会破坏父挂起态。故嵌套 run 取
-  // 独立 WASM 实例（各自 asyncify 栈，互不串扰）；顶层 run 仍复用进程缓存模块（asyncify 变体加载昂贵）。
-  // 嵌套模块在 context.dispose() 后无引用，随 GC 回收（模块无显式 dispose API）。
+  // 每次 run 取独立 WASM 实例，保证 asyncify 的 suspend/resume 栈（WASM 实例级全局）互不串扰。
+  // 并发顶层 run 若共用同一实例，两个 asyncify 挂起会同时修改同一栈区，破坏单挂起约束（P1 隔离）。
+  // getAsyncModule() 只加速二进制加载（缓存 Promise，避免重读磁盘/网络）；实例从该模块 fork 出来，
+  // 各自持有独立运行时 + asyncify 栈；context.dispose() 清理上下文，实例随 GC 回收（无显式 dispose）。
   const mod = opts?.freshModule
     ? await newQuickJSAsyncWASMModuleFromVariant(variant)
     : await getAsyncModule();
@@ -395,9 +397,11 @@ export function createWorkflowRuntime(ctx: WorkflowContext): WorkflowRuntime {
         bindSeqs,
       };
       const primitives = makeWorkflowPrimitives(primitivesCtx, args, wiring);
-      // 嵌套 run（depth>0）取独立 WASM 实例：避免与父 asyncify 挂起态串栈（见 runWorkflowScript 注）。
+      // 每次 run（含顶层）取独立 WASM 实例：两条并发顶层 run 若共用实例会同时挂起同一 asyncify 栈，
+      // 破坏单挂起约束（P1 隔离）。freshModule:true 始终 fork 新实例；WASM 二进制仍经 getAsyncModule()
+      // 缓存加载（快速），各实例持有独立 asyncify 栈，互不串扰（见 runWorkflowScript 注）。
       const scriptResult = await runWorkflowScript(source, primitives, {
-        freshModule: (ctx.depth ?? 0) > 0,
+        freshModule: true,
       });
 
       // ── 终态归一（signal.aborted 优先 → interrupted；否则脚本结果）+ 终态事件 + finishRun ──
