@@ -28,3 +28,18 @@ jobs:
       - name: Native smoke test
         # docker-fallback 沙箱在 GH Actions 可用；nono 缺失自动降级（"全绿或明确降级"）
         run: bun run smoke
+      - name: Set up conda (Python gate)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: "3.12"
+          activate-environment: arclight
+          auto-activate-base: false
+      - name: Install Python deps
+        shell: bash -el {0}
+        run: pip install "pydantic>=2" "pytest>=8" "datamodel-code-generator==0.64.0" "ruff>=0.6" "starlette" "uvicorn" "httpx"
+      - name: Contract drift gate
+        shell: bash -el {0}
+        run: bun run check:contract
+      - name: Python checks
+        shell: bash -el {0}
+        run: bun run check:py
