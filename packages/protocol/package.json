@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "emit-schema": "bun run scripts/emit-json-schema.ts"
+  },
   "dependencies": {
     "zod": "^4.0.0"
   }
