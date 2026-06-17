@@ -17,7 +17,7 @@ import { makeJournaledRun, type RunOneSpec } from "./journaled-run";
 import { makeWorkflowPrimitives, type PrimitiveWiring } from "./primitives";
 import { ResumePlanner } from "./resume";
 import { BudgetExceededError, Scheduler, SchedulerExhaustedError, TokenBudget } from "./scheduler";
-import { resolveWorkflowSource, type WorkflowStore } from "./store";
+import { resolveWorkflowSource, WORKFLOW_NAME_RE } from "./store";
 import { runSubagent } from "./subagent";
 // 共享契约类型自 M0 单一权威来源；runtime.ts 绝不本地重声明。
 import {
@@ -33,6 +33,7 @@ import {
   type WorkflowPrimitives,
   type WorkflowResult,
   type WorkflowRuntime,
+  type WorkflowStorePort,
 } from "./types";
 
 // 异步 wasm 模块按进程缓存：asyncify 变体加载一次复用（与 provider-manager 单例同构）。
@@ -432,6 +433,9 @@ export async function runWorkflow(
   args: unknown,
   ctx: WorkflowContext,
 ): Promise<WorkflowResult> {
-  const source = resolveWorkflowSource(scriptOrName, ctx.store as unknown as WorkflowStore);
+  if (WORKFLOW_NAME_RE.test(scriptOrName.trim()) && !ctx.store) {
+    throw new Error("runWorkflow: ctx.store is required to run a named workflow");
+  }
+  const source = resolveWorkflowSource(scriptOrName, ctx.store as WorkflowStorePort);
   return createWorkflowRuntime(ctx).execute(source, args);
 }

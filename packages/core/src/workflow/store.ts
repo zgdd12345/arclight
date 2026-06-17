@@ -83,7 +83,7 @@ export class WorkflowStore implements WorkflowStorePort {
  *   不存在则抛错（不把裸标识符当脚本跑，安全优先）。
  * - 其余（含 `(`/`;`/换行的合成脚本）→ 视为临场生成的内联源码，原样返回。
  */
-export function resolveWorkflowSource(scriptOrName: string, store: WorkflowStore): string {
+export function resolveWorkflowSource(scriptOrName: string, store: WorkflowStorePort): string {
   const candidate = scriptOrName.trim();
   if (WORKFLOW_NAME_RE.test(candidate)) {
     try {

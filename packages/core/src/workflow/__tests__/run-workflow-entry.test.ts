@@ -46,6 +46,20 @@ describe("M6：公开 runWorkflow(scriptOrName, args, ctx)", () => {
     expect(res).toMatchObject({ status: "completed", output: "BUILT" });
   });
 
+  test("slug 命名但 ctx.store 未设 → 抛 ctx.store is required 错（非 TypeError）", async () => {
+    const { provider } = scriptedProvider([]);
+    const { store: _s, ...baseCtx } = makeCtx({ provider });
+    const ctxWithoutStore: WorkflowContext = {
+      ...baseCtx,
+      parentSessionId: "s",
+      parentTurnId: "t",
+      emit: () => ({}) as never,
+    };
+    await expect(runWorkflow("some-named-workflow", {}, ctxWithoutStore)).rejects.toThrow(
+      /ctx\.store is required/,
+    );
+  });
+
   test("slug 命名但未存 → 抛错（不把裸标识符当脚本跑，安全默认）", async () => {
     const d = mkdtempSync(join(tmpdir(), "wf-entry-"));
     dirs.push(d);
