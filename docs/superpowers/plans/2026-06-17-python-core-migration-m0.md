@@ -75,7 +75,7 @@ Each subsequent milestone gets its own plan written when its predecessor complet
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a `uv`-managed Python package importable as `arclight_core`, with `uv run pytest` working. Later tasks add modules under `src/arclight_core/`.
+- Produces: a conda-env-managed Python package importable as `arclight_core`, with `conda run -n arclight python -m pytest` working. Later tasks add modules under `src/arclight_core/`.
 
 - [ ] **Step 1: Write the failing test**
 
