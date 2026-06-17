@@ -4,7 +4,7 @@ export type Upstream = "ts" | "py";
 export type RouteTable = Record<string, Upstream>;
 
 export const DEFAULT_TABLE: RouteTable = {
-  "/api/health": "ts",
+  "/health": "py",
   "/api/config": "ts",
   "/api/projects": "ts",
   "/api/files": "ts",
