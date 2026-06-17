@@ -125,6 +125,37 @@ describe("Scheduler", () => {
     expect(result).toBe("ok");
   });
 
+  test("maxConcurrent:1 竞态：第二个任务在获槽后被 budget 拒绝，不运行（P1 硬上限）", async () => {
+    // 两个 submit 在同一微任务轮次内通过 pre-queue assertAvailable()（spent 仍为 0），
+    // task2 排在信号量队列后；task1 运行时耗尽 budget；
+    // task2 拿到槽后，post-acquire 二次检查应抛 BudgetExceededError，task2 不执行。
+    const budget = new TokenBudget(10);
+    const s = new Scheduler({ signal: liveSignal(), maxConcurrent: 1, budget });
+
+    let task2Ran = false;
+    let p2Error: unknown;
+
+    // 同步提交两个任务：pre-queue 检查时 spent=0，两者均通过
+    const p1 = s.submit(async () => {
+      budget.charge(10); // 耗尽 budget
+    });
+    // 立即 .catch()——在任何 await 之前挂钩，防止 Bun 将 p2 的延迟拒绝
+    // 报告为 unhandled rejection（p2 在 p1 释放信号量后才异步拒绝）。
+    const p2 = s
+      .submit(async () => {
+        task2Ran = true; // 不应到达此处
+      })
+      .catch((e) => {
+        p2Error = e;
+      });
+
+    await p1;
+    await p2; // p2 经 .catch() 已转为 resolved，安全 await
+
+    expect(p2Error).toBeInstanceOf(BudgetExceededError);
+    expect(task2Ran).toBe(false);
+  });
+
   test("submit 把 signal 传给 task", async () => {
     const sig = liveSignal();
     const s = new Scheduler({ signal: sig });

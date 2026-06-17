@@ -108,6 +108,12 @@ export class Scheduler {
 
     const release = await this.sem.acquire(this.opts.signal);
     try {
+      // 获槽后二次检查：排队等待期间 abort / budget 可能已变化（硬上限不可跳过）
+      if (this.opts.signal.aborted) {
+        release();
+        throw abortError();
+      }
+      this.opts.budget?.assertAvailable();
       return await task(this.opts.signal);
     } finally {
       release();
