@@ -6,7 +6,7 @@
 
 **Architecture:** `@arclight/protocol` (zod v4, single source of truth) emits a JSON Schema bundle; a new Python package `packages/core-py/` generates pydantic v2 models from that bundle. Shared JSON fixtures are validated by BOTH zod (TS) and pydantic (Python) — the contract gate. A new `packages/proxy/` (Bun) sits in front of `/api/*`, reads a route-group→upstream table (all → TS core at M0), and forwards requests including SSE streams.
 
-**Tech Stack:** TypeScript/Bun, zod v4 (`z.toJSONSchema`), Python 3.12 + uv, pydantic v2, `datamodel-code-generator`, pytest, Starlette (later milestones), `bun test`.
+**Tech Stack:** TypeScript/Bun, zod v4 (`z.toJSONSchema`), Python 3.12 in a dedicated conda env `arclight`, pydantic v2, `datamodel-code-generator`, pytest, Starlette (later milestones), `bun test`.
 
 ## Global Constraints
 
@@ -14,6 +14,7 @@
 - **workflow stays JS**: do not port `packages/core/src/workflow/`. Out of scope for all migration milestones.
 - **Protocol single source of truth = zod in `@arclight/protocol`**. Python models are GENERATED, never hand-edited. JSON Schema bundle is a build artifact.
 - **zod `^4.0.0`** (already pinned in `packages/protocol/package.json`); **pydantic `>=2`**; **Python `>=3.12`**; **Starlette `>=0.40`** (matches opensquilla, used from M2).
+- **Python env = dedicated conda env `arclight`** (Python 3.12, already created by the controller with `pydantic pytest datamodel-code-generator ruff` installed). Run every Python command via `conda run -n arclight <cmd>`. There is NO `uv` in this environment — do not call `uv`. The package needs no install step: `packages/core-py/pyproject.toml` sets `[tool.pytest.ini_options] pythonpath = ["src"]`, so `conda run -n arclight python -m pytest` from `packages/core-py` imports `arclight_core` directly.
 - **GLM via OpenAI-compatible endpoint** (bigmodel `/chat/completions`) — relevant from M2; no LLM calls in M0.
 - **sandbox = subprocess + namespace isolation, no interactive TTY** — relevant from M2.
 - **db transition = single arclight SQLite, drizzle is sole migration authority, Python uses raw SQL, one-writer-language-per-table** — relevant from M3.
@@ -90,8 +91,8 @@ def test_package_version_present():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd packages/core-py && uv run pytest tests/test_smoke.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'arclight_core'` (package not yet created/installed).
+Run: `cd packages/core-py && conda run -n arclight python -m pytest tests/test_smoke.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'arclight_core'` (package not yet created).
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -103,7 +104,7 @@ version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2"]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = ["pytest>=8", "datamodel-code-generator>=0.26", "ruff>=0.6"]
 
 [build-system]
@@ -125,14 +126,14 @@ __version__ = "0.0.0"
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd packages/core-py && uv sync && uv run pytest tests/test_smoke.py -v`
-Expected: PASS (1 passed).
+Run: `cd packages/core-py && conda run -n arclight python -m pytest tests/test_smoke.py -v`
+Expected: PASS (1 passed). (The `arclight` env already has deps; `pythonpath=["src"]` makes `arclight_core` importable with no install.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core-py/pyproject.toml packages/core-py/src/arclight_core/__init__.py packages/core-py/tests/test_smoke.py packages/core-py/uv.lock
-git commit -m "feat(core-py): scaffold uv Python package with smoke test"
+git add packages/core-py/pyproject.toml packages/core-py/src/arclight_core/__init__.py packages/core-py/tests/test_smoke.py
+git commit -m "feat(core-py): scaffold conda-managed Python package with smoke test"
 ```
 
 ---
@@ -336,7 +337,7 @@ def main() -> int:
         schema = SCHEMA
     OUT.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "uv", "run", "datamodel-codegen",
+        "datamodel-codegen",
         "--input", str(schema),
         "--input-file-type", "jsonschema",
         "--output", str(OUT),
@@ -353,14 +354,14 @@ if __name__ == "__main__":
 ```
 
 Run codegen:
-Run: `cd packages/core-py && uv run python scripts/gen_models.py`
-Expected: writes `src/arclight_core/protocol/models.py` (exit 0).
+Run: `cd packages/core-py && conda run -n arclight python scripts/gen_models.py`
+Expected: writes `src/arclight_core/protocol/models.py` (exit 0). (`datamodel-codegen` is on PATH inside the `arclight` env, so the subprocess call in `gen_models.py` resolves it.)
 
 > The schema path assumes the monorepo layout `packages/protocol/schema/...` relative to `packages/core-py/`. If your checkout differs, fix the `SCHEMA`/`alt` paths — do not copy the schema file.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd packages/core-py && uv run pytest tests/test_models_generated.py -v`
+Run: `cd packages/core-py && conda run -n arclight python -m pytest tests/test_models_generated.py -v`
 Expected: PASS. (If `datamodel-codegen` named a class differently, e.g. `ArcCommand` split into a union alias, adjust the assertion to the actual generated name and note the mapping in a comment — but prefer `--use-title-as-name` keeping `$defs` keys.)
 
 - [ ] **Step 5: Commit**
@@ -452,7 +453,7 @@ def test_turn_completed_validates():
 - [ ] **Step 2: Run both to verify they fail (or reveal real field mismatches)**
 
 Run: `cd packages/protocol && bun test src/__tests__/fixtures-zod.test.ts`
-Run: `cd packages/core-py && uv run pytest tests/test_fixtures_pydantic.py -v`
+Run: `cd packages/core-py && conda run -n arclight python -m pytest tests/test_fixtures_pydantic.py -v`
 Expected: zod test likely PASSES immediately if fixtures match the schema; the Python test FAILS only if a fixture or generated model mismatches. The point of this step is to surface any field-name drift between your fixture and the real zod schema — fix the FIXTURE to match the schema (the schema is authority), not the schema.
 
 - [ ] **Step 3: Reconcile fixtures to the real schema**
@@ -462,7 +463,7 @@ If either side rejects a fixture, open `packages/protocol/src/commands.ts` and `
 - [ ] **Step 4: Run both to verify they pass**
 
 Run: `cd packages/protocol && bun test src/__tests__/fixtures-zod.test.ts` → PASS
-Run: `cd packages/core-py && uv run pytest tests/test_fixtures_pydantic.py -v` → PASS
+Run: `cd packages/core-py && conda run -n arclight python -m pytest tests/test_fixtures_pydantic.py -v` → PASS
 
 - [ ] **Step 5: Commit**
 
@@ -704,8 +705,8 @@ Expected: see the current root `check` script (TS lint/typecheck/test). Note its
 
 In root `package.json` `"scripts"`, add:
 ```json
-    "check:py": "cd packages/core-py && uv sync --quiet && uv run ruff check . && uv run pytest -q",
-    "check:contract": "cd packages/protocol && bun run emit-schema && cd ../core-py && uv run python scripts/gen_models.py && git diff --exit-code -- src/arclight_core/protocol/models.py packages/protocol/schema"
+    "check:py": "cd packages/core-py && conda run -n arclight ruff check . && conda run -n arclight python -m pytest -q",
+    "check:contract": "cd packages/protocol && bun run emit-schema && cd ../core-py && conda run -n arclight python scripts/gen_models.py && git diff --exit-code -- src/arclight_core/protocol/models.py ../protocol/schema"
 ```
 Then append `&& bun run check:py` to the END of the existing `check` script value (keep everything already there; do not remove TS steps).
 
