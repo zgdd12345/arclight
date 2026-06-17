@@ -3,8 +3,23 @@ import { makeProxy } from "../server";
 
 // Boot the REAL Python health app under uvicorn on an ephemeral-but-fixed port,
 // plus a fake TS upstream, and route through the real proxy handler.
+// NOTE: This suite requires the `arclight` conda env with arclight_core installed.
 const PY_PORT = 8791;
 const repoRoot = new URL("../../../../", import.meta.url).pathname; // packages/proxy/src/__tests__ -> repo root
+
+function arclightEnvAvailable(): boolean {
+  try {
+    const probe = Bun.spawnSync(
+      ["conda", "run", "-n", "arclight", "python", "-c", "import arclight_core.server.app"],
+      { cwd: repoRoot, env: { ...process.env, PYTHONPATH: `${repoRoot}packages/core-py/src` }, stdout: "ignore", stderr: "ignore" },
+    );
+    return probe.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+const E2E_AVAILABLE = arclightEnvAvailable();
+if (!E2E_AVAILABLE) console.warn("[e2e-health] skipping: conda env 'arclight' or arclight_core not importable");
 
 let py: ReturnType<typeof Bun.spawn> | undefined;
 let tsUpstreamServer: ReturnType<typeof Bun.serve> | undefined;
@@ -51,7 +66,7 @@ afterAll(async () => {
   // `conda run` does not propagate signals to its Python grandchild; explicitly
   // kill the uvicorn process by matching the module path so nothing leaks.
   try {
-    const pkill = Bun.spawn(["pkill", "-f", "arclight_core.server.app:app"]);
+    const pkill = Bun.spawn(["pkill", "-f", `arclight_core.server.app:app --port ${PY_PORT}`]);
     await pkill.exited;
   } catch {
     // nothing to kill — fine
@@ -59,7 +74,7 @@ afterAll(async () => {
   tsUpstreamServer?.stop(true);
 });
 
-describe("cross-runtime seam", () => {
+describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam", () => {
   test("/health is served by the real Python app through the proxy", async () => {
     const proxy = makeProxy({
       table: { "/health": "py", "/api/config": "ts" },
