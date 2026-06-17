@@ -42,6 +42,7 @@ def main() -> int:
         "--output", str(OUT),
         "--output-model-type", "pydantic_v2.BaseModel",
         "--target-python-version", "3.12",
+        "--disable-timestamp",
     ]
     print(" ".join(cmd))
     return subprocess.call(cmd)
