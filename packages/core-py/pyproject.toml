@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = ["pydantic>=2", "starlette", "uvicorn"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "datamodel-code-generator==0.64.0", "ruff>=0.6", "httpx"]
+dev = ["pytest>=8", "datamodel-code-generator==0.64.0", "ruff>=0.6", "httpx2"]
 
 [build-system]
 requires = ["hatchling"]
