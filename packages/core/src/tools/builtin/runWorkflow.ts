@@ -1,5 +1,6 @@
 import type { Tool } from "@arclight/protocol";
 import { z } from "zod";
+import type { LoopToolContext } from "../../loop/types";
 import type { WorkflowResult } from "../../workflow";
 import { resolveWorkflowSource, WORKFLOW_NAME_RE } from "../../workflow";
 import { type CoreToolContext, ToolExecError } from "../registry";
@@ -53,7 +54,7 @@ export const runWorkflowTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>
     if (!c.workflows) {
       throw new ToolExecError("workflow runner not configured", "INTERNAL", false);
     }
-    const { store, runtime } = c.workflows;
+    const { store, launch } = c.workflows;
 
     // 解析阶段：命名不存在 / 非法名 / 保存失败 → 归一为 VALIDATION（可重试：LLM 改入参后再试）。
     let source: string;
@@ -73,9 +74,8 @@ export const runWorkflowTool: Tool<z.infer<typeof Input>, z.infer<typeof Output>
       );
     }
 
-    // 执行阶段：runtime 抛出的 run-fatal（abort/budget/backstop）不被吞成 VALIDATION——
-    // 交由 registry 壳归类（signal.aborted→CANCELLED、其余→EXEC_FAILED）。
-    return runtime.execute(source, input.args ?? {});
+    // 执行阶段：launch 据父会话 ctx 装 WorkflowContext 并 runWorkflow（run-fatal 不被吞，交 registry 壳分类）。
+    return launch(source, input.args ?? {}, ctx as unknown as LoopToolContext);
   },
   toModelOutput: (out) =>
     out.status === "completed"

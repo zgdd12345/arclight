@@ -7,7 +7,7 @@ import type {
   ProviderToolSchema,
 } from "../loop/types";
 import type { SandboxService } from "../sandbox/service";
-import type { WorkflowRuntime, WorkflowStore } from "../workflow";
+import type { WorkflowResult, WorkflowStore } from "../workflow";
 
 // ToolRegistry：元数据注册 + schemas 投影（绝不带 execute——工具执行 0% 交 AI SDK）。
 // makeExecuteTool：单工具执行壳——zod 校验 / 超时 / 取消 / 输出投影（>32KB spill），永不 throw。
@@ -16,9 +16,17 @@ import type { WorkflowRuntime, WorkflowStore } from "../workflow";
  * 注：protocol ToolContext 的完整对齐（capability/emit 全量）随 U4 审批接线落地。 */
 export type CoreToolContext = LoopToolContext & {
   sandbox: SandboxService;
-  // 注入式 workflow 运行器（M5）：仅主 agent 的 run_workflow 工具消费；子 agent 受限集不含本工具。
-  // runtime 为 M0 契约的 WorkflowRuntime 实例（两参 execute），由 M6 createWorkflowRuntime 产出。
-  workflows?: { store: WorkflowStore; runtime: WorkflowRuntime };
+  // 注入式 workflow 启动接缝（M6）：仅主 agent 的 run_workflow 工具消费；子 agent 受限集不含本工具。
+  // launch 据本次工具调用的 LoopToolContext（父会话/turn/cwd/signal）装 WorkflowContext 并 runWorkflow——
+  // 进程单例 runtime 无法预捕获 per-run 的会话/信号，故用 per-call 接缝（spec §8 事件绑父会话 / §10 中断绑父信号）。
+  workflows?: {
+    store: WorkflowStore;
+    launch: (
+      source: string,
+      args: Record<string, unknown>,
+      toolCtx: LoopToolContext,
+    ) => Promise<WorkflowResult>;
+  };
 };
 
 /** 工具抛出此错误可控制 envelope 分类与重试性；其他异常一律 EXEC_FAILED */
@@ -56,7 +64,14 @@ export class ToolRegistry {
 export function makeExecuteTool(deps: {
   sandbox: SandboxService;
   artifacts?: ArtifactStore;
-  workflows?: { store: WorkflowStore; runtime: WorkflowRuntime };
+  workflows?: {
+    store: WorkflowStore;
+    launch: (
+      source: string,
+      args: Record<string, unknown>,
+      toolCtx: LoopToolContext,
+    ) => Promise<WorkflowResult>;
+  };
 }): LoopDeps["executeTool"] {
   return async (tool, rawArgs, ctx): Promise<ExecutedToolResult["output"]> => {
     const fail = (

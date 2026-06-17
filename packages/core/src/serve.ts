@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { ApprovalPolicy } from "./approval/policy";
 import { ArtifactStore } from "./artifacts/store";
 import { loadConfig } from "./config/load";
+import { appendEvent } from "./db/appendEvent";
 import { createDb } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { EventBus } from "./events/bus";
@@ -19,9 +20,11 @@ import { removeServerJson, writeServerJson } from "./server/serverJson";
 import { applyPatchTool } from "./tools/builtin/applyPatch";
 import { bashTool } from "./tools/builtin/bash";
 import { readFileTool } from "./tools/builtin/readFile";
+import { runWorkflowTool } from "./tools/builtin/runWorkflow";
 import { writeFileTool } from "./tools/builtin/writeFile";
 import { makeExecuteTool, ToolRegistry } from "./tools/registry";
 import { UsageTracker } from "./usage/tracker";
+import { runWorkflow, WorkflowJournalService, WorkflowStore } from "./workflow";
 
 // arclight serve --repo <path>：迁移锁 → migrate → db/bus → Hono(C1/C2) → server.json 0600
 
@@ -54,7 +57,8 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     .register(readFileTool as never)
     .register(writeFileTool as never)
     .register(applyPatchTool as never)
-    .register(bashTool as never);
+    .register(bashTool as never)
+    .register(runWorkflowTool as never); // M6：主 agent 临场合成入口
   const audit = new AuditLog(arclightDir);
   const runId = `serve-${process.pid}`;
   const approvals = new ApprovalPolicy(db, bus, {
@@ -73,12 +77,44 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     arclightDir,
     sharedRateLimiter,
   );
+  // ── M6 workflow 生产接线 ──
+  const workflowStore = new WorkflowStore(arclightDir);
+  const workflowJournal = new WorkflowJournalService(db);
+  // 子 agent 的工具执行壳：不注入 workflows（杜绝子 agent 经工具层自起 workflow，spec §1/§10）。
+  const subagentExecuteTool = makeExecuteTool({
+    sandbox,
+    artifacts: new ArtifactStore(db, arclightDir),
+  });
+  // per-call 启动接缝：据本次 run_workflow 调用的 LoopToolContext 装 WorkflowContext 并 runWorkflow。
+  const launchWorkflow = (
+    source: string,
+    args: Record<string, unknown>,
+    toolCtx: import("./loop/types").LoopToolContext,
+  ) =>
+    runWorkflow(source, args, {
+      parentSessionId: toolCtx.sessionId,
+      parentTurnId: toolCtx.turnId,
+      cwd: toolCtx.cwd,
+      signal: toolCtx.signal,
+      callProvider: providerManager.callProvider, // 已被 SharedRateLimiter wrap（M2）
+      registry, // 子 agent 经 RestrictedToolRegistry+defaultSafeToolNames 裁剪（run_workflow 非 safe 被排除）
+      approvals,
+      executeTool: subagentExecuteTool,
+      emit: (draft) => appendEvent({ db, bus }, draft), // 绑父会话落主流 SSE（spec §8）
+      store: workflowStore,
+      journal: workflowJournal,
+    });
+
   const runner = new AgentRunner({
     db,
     bus,
     registry,
     callProvider: providerManager.callProvider,
-    executeTool: makeExecuteTool({ sandbox, artifacts: new ArtifactStore(db, arclightDir) }),
+    executeTool: makeExecuteTool({
+      sandbox,
+      artifacts: new ArtifactStore(db, arclightDir),
+      workflows: { store: workflowStore, launch: launchWorkflow }, // M6 注入接缝
+    }),
     approvals,
     onInterrupt: (turnId) => approvals.cancelTurn(turnId), // 中断 → 挂起审批转 cancelled
     arclightDir, // 启用 shadow-git 检查点 + /undo /redo
