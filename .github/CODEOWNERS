@@ -1,0 +1,4 @@
+# ToolSource abstraction layer (spec §3) — agent core owns; frozen after initial merge.
+# All future ToolSource implementations (McpSource, SkillsSource) must be reviewed by the core owner.
+packages/core/src/tools/source.ts @alba
+packages/core/src/tools/__tests__/source.test.ts @alba

@@ -9,6 +9,12 @@ import type { Db } from "../db/client";
 import { events, memories, sessions, turns, workspaces } from "../db/schema";
 import type { EventBus } from "../events/bus";
 import type { ToolRegistry } from "../tools/registry";
+import {
+  collectFragments,
+  composeSources,
+  type SessionCtx,
+  type ToolSource,
+} from "../tools/source";
 import { type CompactResult, compact, estimateTokens, shouldCompact } from "./compaction";
 import { queryLoop } from "./query-loop";
 import type { ApprovalSeam, CallProvider, LoopDeps, LoopState } from "./types";
@@ -45,6 +51,9 @@ export type RunnerDeps = {
   };
   maxReflections?: number;
   maxRetries?: number;
+  /** ToolSource 列表（spec §3）：配置后 startTurn 在首轮前动态组合 registry + 注入提示片段。
+   *  未配置时退化为 registry 字段的静态注册（向后兼容 serve.ts 现有接线）。 */
+  sources?: ToolSource[];
 };
 
 type SessionCheckpoint = {
@@ -324,13 +333,24 @@ export class AgentRunner {
     } catch {
       // memories 表不可用：跳过注入
     }
+    // ToolSource 组合 + 片段注入（spec §3）：若 deps.sources 已配置，按当前 session 上下文
+    // 动态组合 registry（覆盖静态 this.deps.registry）；contribute() 片段作 role:"user" 注入，
+    // 与 RepoMap / 记忆注入同口径（系统提示词由 makeCallProvider 单点持有，runner 不重组）。
+    let loopRegistry = this.deps.registry;
+    if (this.deps.sources !== undefined) {
+      const sCtx: SessionCtx = { sessionId, cwd, signal: ac.signal };
+      loopRegistry = await composeSources(this.deps.sources, sCtx);
+      for (const frag of collectFragments(this.deps.sources, sCtx)) {
+        messages.push({ role: "user", content: frag.content });
+      }
+    }
     messages.push({ role: "user", content: args.userText });
 
     const state: LoopState = { sessionId, turnId, cwd, messages };
     const loopDeps: LoopDeps = {
       emit,
       callProvider: this.deps.callProvider,
-      registry: this.deps.registry,
+      registry: loopRegistry,
       approvals: this.deps.approvals,
       executeTool: this.deps.executeTool,
       signal: ac.signal,
