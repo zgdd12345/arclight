@@ -26,11 +26,19 @@ export function makeProxy(opts: ProxyOpts): (req: Request) => Promise<Response> 
       redirect: "manual",
     };
     const res = await fetch(upstreamUrl, init);
-    // Stream body straight through (SSE-safe); copy status + headers verbatim.
+    // Strip hop-by-hop / encoding headers that become invalid after fetch decodes
+    // the body (double-decompression / length mismatch). Keep everything else,
+    // notably content-type so SSE clients see "text/event-stream".
+    const headers = new Headers(res.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    headers.delete("transfer-encoding");
+    headers.delete("connection");
+    // Stream body straight through (SSE-safe).
     return new Response(res.body, {
       status: res.status,
       statusText: res.statusText,
-      headers: res.headers,
+      headers,
     });
   };
 }

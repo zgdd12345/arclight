@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "datamodel-code-generator>=0.26", "ruff>=0.6"]
+dev = ["pytest>=8", "datamodel-code-generator==0.64.0", "ruff>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -17,3 +17,6 @@ packages = ["src/arclight_core"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["src/arclight_core/protocol/models.py"]
