@@ -67,8 +67,9 @@ export type SchedulerOpts = {
   maxConcurrent?: number;
   /** 单 run 累计 agent 上限（防失控 backstop），默认 256。 */
   maxAgentsPerRun?: number;
-  /** 共享 token budget（可选）；准入时做硬上限预检。 */
-  budget?: TokenBudget;
+  /** 共享 token budget（可选）；准入时做硬上限预检。类型为最小结构接口（Scheduler 仅调用 assertAvailable），
+   *  允许传入 TokenBudget 或满足该接缝的共享实例（例如来自 WorkflowContext.sharedBudget）。 */
+  budget?: { assertAvailable(): void };
 };
 
 /** spec §6：默认并发上限 min(16, cores-2)，下限 1。 */

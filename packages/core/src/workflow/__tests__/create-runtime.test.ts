@@ -200,6 +200,68 @@ describe("M6 F2：createWorkflowRuntime —— 集成运行时", () => {
   });
 });
 
+describe("M6 F2：TokenBudget 共享记账 — onUsage 穿透 + nested workflow 预算共享", () => {
+  test("onUsage → budget.charge: provider usage 累计到 budget，超限后第二次 agent 被 BudgetExceeded 拦截", async () => {
+    // Budget = 5 tokens; first agent charges 6 (3 input + 3 output).
+    // Second agent hits scheduler.submit → assertAvailable() (6 >= 5) → BudgetExceededError.
+    // This proves the onUsage → chargeUsage → budget.charge chain is wired end-to-end.
+    const { ctx } = ctxWithEvents({
+      budgetTotal: 5,
+      callProvider: scriptedProvider([
+        {
+          result: {
+            text: "first-done",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: { inputTokens: 3, outputTokens: 3 }, // 6 total > budget 5
+          },
+        },
+      ]).provider,
+    });
+    const rt = createWorkflowRuntime(ctx);
+    const res = await rt.execute(`agent("first"); agent("second")`, {});
+    expect(res.status).toBe("failed");
+    expect(res.error).toMatch(/budget/i);
+  });
+
+  test("nested workflow() shares parent TokenBudget (no 2× overspend fix)", async () => {
+    // Budget = 5 tokens; outer agent charges 6 → budget exhausted.
+    // workflow("child") spawns a child runtime via createWorkflowRuntime with sharedBudget: budget,
+    // so the child sees the SAME instance (spent=6 >= total=5) and rejects the inner agent.
+    // Without the fix (fresh budget in child), the inner agent would succeed with a new 0/5 budget.
+    const childSource = `agent("inner")`;
+    const store = {
+      ...dummyStore,
+      has: (n: string) => n === "child",
+      load: (n: string) => {
+        if (n !== "child") throw new Error(`no such workflow: ${n}`);
+        return { name: "child", source: childSource, scriptHash: "child-hash" };
+      },
+    };
+    const { ctx } = ctxWithEvents({
+      budgetTotal: 5,
+      store,
+      callProvider: scriptedProvider([
+        {
+          result: {
+            text: "outer-done",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: { inputTokens: 3, outputTokens: 3 }, // 6 total > budget 5
+          },
+        },
+        // second step is never reached: inner agent is blocked by the shared exhausted budget
+      ]).provider,
+    });
+    const rt = createWorkflowRuntime(ctx);
+    // outer agent charges 6 tokens; workflow("child") → inner agent hits the shared budget
+    const res = await rt.execute(`agent("outer"); workflow("child")`, {});
+    expect(res.status).toBe("failed");
+    // error is either direct "budget exhausted" or the sub-workflow wrapper around it
+    expect(res.error).toMatch(/budget|sub-workflow/i);
+  });
+});
+
 describe("M6 F2：deriveChildCwd —— per-subagent sandbox 隔离接缝（spec §6）", () => {
   test("默认继承父 cwd；isolation:'worktree' 派生独立 cwd（并发两子互不相同）", () => {
     const { ctx } = ctxWithEvents({ cwd: "/repo" });

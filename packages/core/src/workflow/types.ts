@@ -190,6 +190,11 @@ export type WorkflowContext = {
   maxAgentsPerRun?: number;
   /** 内联子 workflow 一层嵌套深度守卫（spec §1/§4：仅一层）。顶层 = 0。 */
   depth?: number;
+  /** Shared budget instance threaded into nested workflow() runs so accounting is run-wide (not
+   *  reset per nesting). Set by createWorkflowRuntime when spawning a child — top-level runs
+   *  leave this unset and get a fresh TokenBudget. Typed structurally (Budget + charge/assertAvailable)
+   *  to avoid an import cycle between types.ts and scheduler.ts. */
+  sharedBudget?: Budget & { charge(tokens: number): void; assertAvailable(): void };
 };
 
 // ── 10. runtime 端口（M6 createWorkflowRuntime 产出）──────────────────────────

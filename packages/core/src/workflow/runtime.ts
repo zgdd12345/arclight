@@ -251,9 +251,11 @@ export function createWorkflowRuntime(ctx: WorkflowContext): WorkflowRuntime {
     async execute(source: string, args: unknown): Promise<WorkflowResult> {
       const sh = scriptHash(source);
       const ah = argsHash(args);
-      const budget = new TokenBudget(
-        ctx.budgetTotal && ctx.budgetTotal > 0 ? ctx.budgetTotal : DEFAULT_TOKEN_BUDGET,
-      );
+      const budget =
+        ctx.sharedBudget ??
+        new TokenBudget(
+          ctx.budgetTotal && ctx.budgetTotal > 0 ? ctx.budgetTotal : DEFAULT_TOKEN_BUDGET,
+        );
       const scheduler = new Scheduler({
         signal: ctx.signal,
         ...(ctx.maxConcurrent !== undefined ? { maxConcurrent: ctx.maxConcurrent } : {}),
@@ -360,7 +362,11 @@ export function createWorkflowRuntime(ctx: WorkflowContext): WorkflowRuntime {
           throw new WorkflowApiError("workflow() requires a store to load named workflows");
         }
         const loaded = ctx.store.load(name); // 不存在则抛（store 收口）
-        const child = createWorkflowRuntime({ ...ctx, depth: (ctx.depth ?? 0) + 1 });
+        const child = createWorkflowRuntime({
+          ...ctx,
+          depth: (ctx.depth ?? 0) + 1,
+          sharedBudget: budget, // thread run-wide budget into nested run (no 2x overspend)
+        });
         const res = await child.execute(loaded.source, wfArgs ?? {});
         if (res.status === "completed") return res.output ?? null;
         throw new WorkflowApiError(res.error ?? `sub-workflow "${name}" ${res.status}`);
