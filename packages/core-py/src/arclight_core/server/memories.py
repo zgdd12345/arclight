@@ -3,6 +3,7 @@ Reads + writes the shared SQLite `memories` table; Python is the SOLE writer (th
 loop only SELECTs enabled rows). Never migrates schema. enabled is a SQLite 0/1.
 """
 import os
+import time
 import uuid
 
 from starlette.requests import Request
@@ -61,5 +62,48 @@ def make_memories_post(settings: Settings):
         finally:
             conn.close()
         return JSONResponse({"ok": True, "id": mem_id}, status_code=201)
+
+    return _handler
+
+
+def make_memories_patch(settings: Settings):
+    # Partial update of content/enabled; always bumps updated_at. Parity with
+    # memories.ts PATCH /:id. enabled stored as 0/1. The dynamic SET clause joins
+    # only fixed column-name fragments — values are always parameterized.
+    async def _handler(request: Request) -> JSONResponse:
+        mem_id = request.path_params["memory_id"]
+        body = await json_or_empty(request)
+        if not os.path.exists(settings.db_path):
+            return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+        conn = connect(settings.db_path)
+        try:
+            row = conn.execute("SELECT id FROM memories WHERE id = ?", (mem_id,)).fetchone()
+            if row is None:
+                return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+            cols = ["updated_at = ?"]
+            vals: list = [int(time.time() * 1000)]
+            if "content" in body:
+                content = str(body.get("content") or "").strip()[:_MAX_CONTENT]
+                if not content:
+                    return JSONResponse(
+                        {"ok": False, "code": "VALIDATION", "message": "content required"},
+                        status_code=400,
+                    )
+                cols.append("content = ?")
+                vals.append(content)
+            if "enabled" in body:
+                enabled = body.get("enabled")
+                if not isinstance(enabled, bool):
+                    return JSONResponse(
+                        {"ok": False, "code": "VALIDATION", "message": "enabled 须为布尔"},
+                        status_code=400,
+                    )
+                cols.append("enabled = ?")
+                vals.append(1 if enabled else 0)
+            vals.append(mem_id)
+            conn.execute(f"UPDATE memories SET {', '.join(cols)} WHERE id = ?", vals)
+        finally:
+            conn.close()
+        return JSONResponse({"ok": True})
 
     return _handler
