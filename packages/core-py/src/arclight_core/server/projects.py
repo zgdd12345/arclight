@@ -8,17 +8,18 @@ import sqlite3
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .db import connect
 from .settings import Settings
 
 
 def _read_workspaces(db_path: str) -> list[dict]:
-    # Read-only by discipline: SELECT only, never write/migrate. busy_timeout for WAL contention.
+    # Read-only by discipline: SELECT only. Deterministic ORDER BY rowid (insertion
+    # order) now that workspaces writes move to Python (slice-3 carry-forward).
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"not found: {db_path}")
-    conn = sqlite3.connect(db_path, timeout=5.0)
+    conn = connect(db_path)
     try:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT id, name, repo_path FROM workspaces").fetchall()
+        rows = conn.execute("SELECT id, name, repo_path FROM workspaces ORDER BY rowid").fetchall()
         return [{"workspaceId": r["id"], "name": r["name"], "repoPath": r["repo_path"]} for r in rows]
     finally:
         conn.close()

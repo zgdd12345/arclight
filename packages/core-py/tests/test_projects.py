@@ -85,3 +85,21 @@ def test_available_excludes_registered(tmp_path):
     s = Settings(db_path=str(db), projects_root=str(root), token="t", dev_no_auth=True)
     body = TestClient(create_app(s)).get("/api/projects").json()
     assert [d["name"] for d in body["available"]] == []  # gamma is registered → excluded
+
+
+def test_projects_order_is_insertion_order(tmp_path):
+    db = tmp_path / "arclight.sqlite"
+    root = tmp_path / "projects"
+    root.mkdir()
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, repo_path TEXT NOT NULL)"
+    )
+    # Insert zeta before alpha; rowid order must preserve insertion, not name sort.
+    conn.execute("INSERT INTO workspaces (id,name,repo_path) VALUES ('w2','zeta','/p/zeta')")
+    conn.execute("INSERT INTO workspaces (id,name,repo_path) VALUES ('w1','alpha','/p/alpha')")
+    conn.commit()
+    conn.close()
+    s = Settings(db_path=str(db), projects_root=str(root), token="t", dev_no_auth=True)
+    body = TestClient(create_app(s)).get("/api/projects").json()
+    assert [p["name"] for p in body["projects"]] == ["zeta", "alpha"]
