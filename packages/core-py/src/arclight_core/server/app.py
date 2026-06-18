@@ -1,15 +1,20 @@
-"""Arclight core HTTP server (Python). M1 slice 1: only GET /health.
+"""Arclight core HTTP server (Python). M1: GET /health (open) + GET /api/projects (auth).
 
-Contract source of truth: packages/core/src/server/routes/health.ts —
-returns {ok, service, version, uptimeMs}. /health is OPEN (no auth);
-/api/* (added in later slices) will require a bearer token.
+Contract sources of truth:
+- /health  : packages/core/src/server/routes/health.ts
+- auth     : packages/core/src/server/middleware/auth.ts
+- /api/projects : packages/core/src/server/routes/projects.ts
 """
 import time
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from .auth import BearerAuthMiddleware
+from .settings import Settings, from_env
 
 _SERVICE = "arclight-core"
 _VERSION = "0.0.1"
@@ -27,8 +32,19 @@ async def _health(_request: Request) -> JSONResponse:
     )
 
 
-def create_app() -> Starlette:
-    return Starlette(routes=[Route("/health", _health, methods=["GET"])])
+def create_app(settings: Settings | None = None) -> Starlette:
+    settings = settings or from_env()
+    # Imported here so /health-only apps (slice 1 tests) don't require the projects deps path.
+    from .projects import make_projects_get
+
+    routes = [
+        Route("/health", _health, methods=["GET"]),
+        Route("/api/projects", make_projects_get(settings), methods=["GET"]),
+    ]
+    middleware = [
+        Middleware(BearerAuthMiddleware, token=settings.token, dev_no_auth=settings.dev_no_auth),
+    ]
+    return Starlette(routes=routes, middleware=middleware)
 
 
 app = create_app()
