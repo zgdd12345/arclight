@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { ApprovalPolicy } from "./approval/policy";
 import { ArtifactStore } from "./artifacts/store";
 import { loadConfig } from "./config/load";
-import { appendEvent } from "./db/appendEvent";
 import { createDb } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { EventBus } from "./events/bus";
@@ -24,7 +23,7 @@ import { runWorkflowTool } from "./tools/builtin/runWorkflow";
 import { writeFileTool } from "./tools/builtin/writeFile";
 import { makeExecuteTool, ToolRegistry } from "./tools/registry";
 import { UsageTracker } from "./usage/tracker";
-import { runWorkflow, WorkflowJournalService, WorkflowStore } from "./workflow";
+import { createWorkflowRunner, WorkflowJournalService, WorkflowStore } from "./workflow";
 
 // arclight serve --repo <path>：迁移锁 → migrate → db/bus → Hono(C1/C2) → server.json 0600
 
@@ -85,25 +84,17 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     sandbox,
     artifacts: new ArtifactStore(db, arclightDir),
   });
-  // per-call 启动接缝：据本次 run_workflow 调用的 LoopToolContext 装 WorkflowContext 并 runWorkflow。
-  const launchWorkflow = (
-    source: string,
-    args: Record<string, unknown>,
-    toolCtx: import("./loop/types").LoopToolContext,
-  ) =>
-    runWorkflow(source, args, {
-      parentSessionId: toolCtx.sessionId,
-      parentTurnId: toolCtx.turnId,
-      cwd: toolCtx.cwd,
-      signal: toolCtx.signal,
-      callProvider: providerManager.callProvider, // 已被 SharedRateLimiter wrap（M2）
-      registry, // 子 agent 经 RestrictedToolRegistry+defaultSafeToolNames 裁剪（run_workflow 非 safe 被排除）
-      approvals,
-      executeTool: subagentExecuteTool,
-      emit: (draft) => appendEvent({ db, bus }, draft), // 绑父会话落主流 SSE（spec §8）
-      store: workflowStore,
-      journal: workflowJournal,
-    });
+  // per-call 启动接缝（createWorkflowRunner，workflow/launch.ts）：tool 注入与 HTTP route 共用同一 WorkflowContext 装配。
+  const launchWorkflow = createWorkflowRunner({
+    db,
+    bus,
+    callProvider: providerManager.callProvider,
+    registry,
+    approvals,
+    executeTool: subagentExecuteTool,
+    store: workflowStore,
+    journal: workflowJournal,
+  });
 
   const runner = new AgentRunner({
     db,

@@ -6,6 +6,7 @@ export { BubblingApprovalSeam } from "./bubbling-approval"; // M4
 export { WorkflowEvents } from "./events"; // M4
 export { argsHash, canonicalJson, scriptHash, specHash } from "./hash"; // M3
 export { deriveChildSignal, terminalEvent } from "./interrupt"; // M4
+export { createWorkflowRunner, type WorkflowRunner } from "./launch";
 export { WorkflowJournalService } from "./journal-service"; // M3
 export { makeJournaledRun } from "./journaled-run"; // M3
 export type { PrimitiveWiring } from "./primitives";
