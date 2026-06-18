@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeProxy } from "../server";
@@ -17,7 +17,12 @@ function arclightEnvAvailable(): boolean {
   try {
     const probe = Bun.spawnSync(
       ["conda", "run", "-n", "arclight", "python", "-c", "import arclight_core.server.app"],
-      { cwd: repoRoot, env: { ...process.env, PYTHONPATH: `${repoRoot}packages/core-py/src` }, stdout: "ignore", stderr: "ignore" },
+      {
+        cwd: repoRoot,
+        env: { ...process.env, PYTHONPATH: `${repoRoot}packages/core-py/src` },
+        stdout: "ignore",
+        stderr: "ignore",
+      },
     );
     return probe.exitCode === 0;
   } catch {
@@ -25,7 +30,8 @@ function arclightEnvAvailable(): boolean {
   }
 }
 const E2E_AVAILABLE = arclightEnvAvailable();
-if (!E2E_AVAILABLE) console.warn("[e2e-projects] skipping: conda env 'arclight' or arclight_core not importable");
+if (!E2E_AVAILABLE)
+  console.warn("[e2e-projects] skipping: conda env 'arclight' or arclight_core not importable");
 
 const PY_PORT = freePort();
 const TOKEN = "test-token-123";
@@ -54,19 +60,43 @@ beforeAll(async () => {
   mkdirSync(projectsRoot, { recursive: true });
   mkdirSync(join(projectsRoot, "beta"));
   const seed = Bun.spawnSync(
-    ["conda", "run", "-n", "arclight", "python", "-c",
+    [
+      "conda",
+      "run",
+      "-n",
+      "arclight",
+      "python",
+      "-c",
       `import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, repo_path TEXT NOT NULL)"); c.execute("INSERT INTO workspaces (id,name,repo_path) VALUES ('ws1','alpha','/projects/alpha')"); c.commit(); c.close()`,
-      dbPath],
+      dbPath,
+    ],
     { stdout: "ignore", stderr: "pipe" },
   );
-  if (seed.exitCode !== 0) throw new Error(`seed failed: ${seed.stderr}`);
+  if (seed.exitCode !== 0) throw new Error(`seed failed: ${new TextDecoder().decode(seed.stderr)}`);
 
   py = Bun.spawn(
-    ["conda", "run", "-n", "arclight", "python", "-m", "uvicorn",
-      "arclight_core.server.app:app", "--port", String(PY_PORT), "--app-dir", "packages/core-py/src"],
+    [
+      "conda",
+      "run",
+      "-n",
+      "arclight",
+      "python",
+      "-m",
+      "uvicorn",
+      "arclight_core.server.app:app",
+      "--port",
+      String(PY_PORT),
+      "--app-dir",
+      "packages/core-py/src",
+    ],
     {
       cwd: repoRoot,
-      env: { ...process.env, ARCLIGHT_DB_PATH: dbPath, ARCLIGHT_PROJECTS_ROOT: projectsRoot, ARCLIGHT_TOKEN: TOKEN },
+      env: {
+        ...process.env,
+        ARCLIGHT_DB_PATH: dbPath,
+        ARCLIGHT_PROJECTS_ROOT: projectsRoot,
+        ARCLIGHT_TOKEN: TOKEN,
+      },
       stdout: "ignore",
       stderr: "ignore",
     },
@@ -105,9 +135,15 @@ describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam: GET /api/projects", () => {
       new Request("http://proxy/api/projects", { headers: { Authorization: `Bearer ${TOKEN}` } }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; projects: { name: string }[]; available: { name: string }[] };
+    const body = (await res.json()) as {
+      ok: boolean;
+      projects: { workspaceId: string; name: string; repoPath: string }[];
+      available: { name: string }[];
+    };
     expect(body.ok).toBe(true);
-    expect(body.projects).toEqual([{ workspaceId: "ws1", name: "alpha", repoPath: "/projects/alpha" }]);
+    expect(body.projects).toEqual([
+      { workspaceId: "ws1", name: "alpha", repoPath: "/projects/alpha" },
+    ]);
     expect(body.available.map((d) => d.name)).toContain("beta");
   });
 
@@ -119,7 +155,10 @@ describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam: GET /api/projects", () => {
 
   test("POST /api/projects still routes to TS", async () => {
     const res = await proxy()(
-      new Request("http://proxy/api/projects", { method: "POST", headers: { Authorization: `Bearer ${TOKEN}` } }),
+      new Request("http://proxy/api/projects", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      }),
     );
     expect(await res.json()).toEqual({ via: "ts-write" });
   });

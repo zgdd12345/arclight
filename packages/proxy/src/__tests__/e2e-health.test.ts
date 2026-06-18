@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { makeProxy } from "../server";
 
-// Boot the REAL Python health app under uvicorn on an ephemeral-but-fixed port,
+// Boot the REAL Python health app under uvicorn on a dynamically-allocated port,
 // plus a fake TS upstream, and route through the real proxy handler.
 // NOTE: This suite requires the `arclight` conda env with arclight_core installed.
 
