@@ -52,6 +52,27 @@ export function createWorkflowsRoute(deps: {
       if (body.name !== undefined && !WORKFLOW_NAME_RE.test(body.name)) {
         return c.json({ ok: false, code: "VALIDATION", message: "invalid workflow name" }, 400);
       }
+      // Guard: mirror the tool's zod Input — script must be a non-empty string, args must be an
+      // object, saveAs must be a non-empty string. body is cast from unknown JSON so these can
+      // diverge from the declared RunBody type at runtime; widen to unknown to keep TS happy.
+      if (body.script !== undefined) {
+        const v: unknown = body.script;
+        if (typeof v !== "string" || v.length === 0) {
+          return c.json({ ok: false, code: "VALIDATION", message: "script must be a non-empty string" }, 400);
+        }
+      }
+      if (body.args !== undefined) {
+        const v: unknown = body.args;
+        if (typeof v !== "object" || v === null || Array.isArray(v)) {
+          return c.json({ ok: false, code: "VALIDATION", message: "args must be an object" }, 400);
+        }
+      }
+      if (body.saveAs !== undefined) {
+        const v: unknown = body.saveAs;
+        if (typeof v !== "string" || v.length === 0) {
+          return c.json({ ok: false, code: "VALIDATION", message: "saveAs must be a non-empty string" }, 400);
+        }
+      }
 
       // 解析源码：script 直用（saveAs 则持久化）；name 经 store 收口（不存在→VALIDATION）。
       let source: string;

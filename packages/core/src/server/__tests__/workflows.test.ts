@@ -118,6 +118,30 @@ describe("workflows route (HTTP)", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { code: string }).code).toBe("VALIDATION");
   });
+
+  test("POST /run rejects empty script string", async () => {
+    const res = await app.fetch(
+      new Request("http://x/api/workflows/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ script: "" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("VALIDATION");
+  });
+
+  test("POST /run rejects non-object args", async () => {
+    const res = await app.fetch(
+      new Request("http://x/api/workflows/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ script: "agent('x');", args: "nope" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("VALIDATION");
+  });
 });
 
 describe("workflows route via createApp", () => {
