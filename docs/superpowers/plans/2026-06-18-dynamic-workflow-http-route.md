@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - Test runner for `packages/core`: **`bun test`** (test files import from `"bun:test"`). Run targeted tests with `bun test <path>`.
+- **Do not use `mock.module(...)`** — bun applies module mocks process-wide for the rest of the `bun test` run, which strips the real exports from the mocked module for every other test file sharing the process (this broke `runtime.test.ts`). Use dependency-injection seams (e.g. an optional fn parameter defaulting to the real import) instead.
 - TypeScript `exactOptionalPropertyTypes` is on — never pass `undefined` for an optional field; spread it conditionally (`...(x !== undefined ? { x } : {})`).
 - Route convention (mirror `packages/core/src/server/routes/memories.ts`): `createXxxRoute(deps)` returns a `new Hono()`; success → `c.json({ ok: true, ... })`; failure → `c.json({ ok: false, code: "VALIDATION" | "NOT_FOUND", message }, <status>)`.
 - All `/api/*` routes sit behind `bearerAuth`; tests pass `devNoAuth: true` to `createApp` to bypass.
@@ -61,36 +62,39 @@
     toolCtx: LoopToolContext,
   ) => Promise<WorkflowResult>;
 
-  export function createWorkflowRunner(deps: {
-    db: Db;
-    bus: EventBus;
-    callProvider: WorkflowContext["callProvider"];
-    registry: WorkflowContext["registry"];
-    approvals: WorkflowContext["approvals"];
-    executeTool: WorkflowContext["executeTool"];
-    store: WorkflowStore;
-    journal: WorkflowJournalService;
-  }): WorkflowRunner;
+  export function createWorkflowRunner(
+    deps: {
+      db: Db;
+      bus: EventBus;
+      callProvider: WorkflowContext["callProvider"];
+      registry: WorkflowContext["registry"];
+      approvals: WorkflowContext["approvals"];
+      executeTool: WorkflowContext["executeTool"];
+      store: WorkflowStore;
+      journal: WorkflowJournalService;
+    },
+    // injectable seam (defaults to the real runWorkflow) — lets the unit test
+    // capture the assembled WorkflowContext without process-wide module mocking.
+    runWorkflowFn?: typeof import("./runtime").runWorkflow,
+  ): WorkflowRunner;
   ```
 
 - [ ] **Step 1: Write the failing test**
 
-The factory's whole job is to map a per-call `LoopToolContext` onto a `WorkflowContext` (the bug-prone part: it is easy to cross `parentSessionId`/`parentTurnId` or drop `signal`). We assert that mapping by mocking the `runWorkflow` import and capturing the `ctx` it receives. `mock.module` must be set up before the dynamic `import("../launch")` so the factory binds the mock.
+The factory's whole job is to map a per-call `LoopToolContext` onto a `WorkflowContext` (the bug-prone part: it is easy to cross `parentSessionId`/`parentTurnId` or drop `signal`). We assert that mapping by injecting a capturing fake through the `runWorkflowFn` seam — **do NOT use `mock.module`**: bun applies module mocks process-wide, and mocking `"../runtime"` here strips the real `runWorkflow`/`runWorkflowScript`/`createWorkflowRuntime` exports from every other test file that shares the `bun test` process (it breaks `runtime.test.ts`). The injected seam keeps the mock local to this test.
 
 ```typescript
 // packages/core/src/workflow/__tests__/launch.test.ts
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { createWorkflowRunner } from "../launch";
 
 describe("createWorkflowRunner", () => {
   test("maps the calling LoopToolContext onto the WorkflowContext", async () => {
     let captured: { source: string; args: unknown; ctx: Record<string, unknown> } | undefined;
-    mock.module("../runtime", () => ({
-      runWorkflow: async (source: string, args: unknown, ctx: Record<string, unknown>) => {
-        captured = { source, args, ctx };
-        return { status: "completed", output: { ok: 1 } };
-      },
-    }));
-    const { createWorkflowRunner } = await import("../launch");
+    const fakeRun = (async (source: string, args: unknown, ctx: Record<string, unknown>) => {
+      captured = { source, args, ctx };
+      return { status: "completed", output: { ok: 1 } };
+    }) as never;
 
     const callProvider = (async () => ({})) as never;
     const registry = { kind: "registry" } as never;
@@ -98,16 +102,19 @@ describe("createWorkflowRunner", () => {
     const executeTool = (async () => ({ ok: true })) as never;
     const store = { kind: "store" } as never;
     const journal = { kind: "journal" } as never;
-    const runner = createWorkflowRunner({
-      db: { kind: "db" } as never,
-      bus: { kind: "bus" } as never,
-      callProvider,
-      registry,
-      approvals,
-      executeTool,
-      store,
-      journal,
-    });
+    const runner = createWorkflowRunner(
+      {
+        db: { kind: "db" } as never,
+        bus: { kind: "bus" } as never,
+        callProvider,
+        registry,
+        approvals,
+        executeTool,
+        store,
+        journal,
+      },
+      fakeRun,
+    );
 
     const signal = new AbortController().signal;
     const toolCtx = {
@@ -168,18 +175,24 @@ export type WorkflowRunner = (
   toolCtx: LoopToolContext,
 ) => Promise<WorkflowResult>;
 
-export function createWorkflowRunner(deps: {
-  db: Db;
-  bus: EventBus;
-  callProvider: WorkflowContext["callProvider"];
-  registry: WorkflowContext["registry"];
-  approvals: WorkflowContext["approvals"];
-  executeTool: WorkflowContext["executeTool"];
-  store: WorkflowStore;
-  journal: WorkflowJournalService;
-}): WorkflowRunner {
+export function createWorkflowRunner(
+  deps: {
+    db: Db;
+    bus: EventBus;
+    callProvider: WorkflowContext["callProvider"];
+    registry: WorkflowContext["registry"];
+    approvals: WorkflowContext["approvals"];
+    executeTool: WorkflowContext["executeTool"];
+    store: WorkflowStore;
+    journal: WorkflowJournalService;
+  },
+  // Injectable seam (defaults to the real runWorkflow). The unit test injects a
+  // capturing fake — do NOT swap this for mock.module, which leaks process-wide
+  // and breaks runtime.test.ts by stripping runtime.ts's other exports.
+  runWorkflowFn: typeof runWorkflow = runWorkflow,
+): WorkflowRunner {
   return (source, args, toolCtx) =>
-    runWorkflow(source, args, {
+    runWorkflowFn(source, args, {
       parentSessionId: toolCtx.sessionId,
       parentTurnId: toolCtx.turnId,
       cwd: toolCtx.cwd,
