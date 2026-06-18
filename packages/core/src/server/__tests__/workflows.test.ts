@@ -6,7 +6,6 @@ import { eq } from "drizzle-orm";
 import { createDb } from "../../db/client";
 import { runMigrations } from "../../db/migrate";
 import { sessions, turns } from "../../db/schema";
-import { EventBus } from "../../events/bus";
 import { TemplateStore, WorkflowStore } from "../../workflow";
 import type { WorkflowRunner } from "../../workflow";
 import { createWorkflowsRoute } from "../routes/workflows";
@@ -86,6 +85,7 @@ describe("workflows route (HTTP)", () => {
     expect(runCalls[0]?.source).toBe("agent('do work');");
     expect(runCalls[0]?.args).toEqual({ seed: 1 });
     expect(runCalls[0]?.sessionId).toBe(body.sessionId);
+    expect(runCalls[0]?.turnId).toBe(body.turnId);
 
     // session + turn rows exist; turn moved to completed
     const sess = conn.db.select().from(sessions).where(eq(sessions.id, body.sessionId)).get();

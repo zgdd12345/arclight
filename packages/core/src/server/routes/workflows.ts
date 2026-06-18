@@ -32,7 +32,7 @@ export function createWorkflowsRoute(deps: {
     .get("/templates", (c) => c.json({ ok: true, templates: templates.list() }))
     .get("/templates/:name", (c) => {
       const name = c.req.param("name");
-      if (!templates.has(name)) return c.json({ ok: false, code: "NOT_FOUND" }, 404);
+      if (!templates.has(name)) return c.json({ ok: false, code: "NOT_FOUND", message: "template not found" }, 404);
       const t = templates.load(name);
       return c.json({ ok: true, name: t.name, source: t.source });
     })
