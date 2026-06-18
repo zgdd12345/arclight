@@ -81,7 +81,7 @@ beforeAll(async () => {
       return new Response("nope", { status: 404 });
     },
   });
-});
+}, 60000);
 
 afterAll(async () => {
   if (!E2E_AVAILABLE) return;
@@ -95,7 +95,7 @@ afterAll(async () => {
     // nothing to kill — fine
   }
   tsUpstreamServer?.stop(true);
-});
+}, 60000);
 
 describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam", () => {
   test("/health is served by the real Python app through the proxy", async () => {

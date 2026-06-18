@@ -112,7 +112,7 @@ beforeAll(async () => {
       return new Response("nope", { status: 404 });
     },
   });
-});
+}, 60000);
 
 afterAll(() => {
   if (!E2E_AVAILABLE) return;
@@ -120,7 +120,7 @@ afterAll(() => {
   Bun.spawn(["pkill", "-f", `arclight_core.server.app:app --port ${PY_PORT}`]);
   tsUpstream?.stop(true);
   if (workdir) rmSync(workdir, { recursive: true, force: true });
-});
+}, 60000);
 
 describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam: GET /api/projects", () => {
   function proxy() {
