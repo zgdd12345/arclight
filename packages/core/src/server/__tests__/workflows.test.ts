@@ -60,7 +60,7 @@ describe("workflows route (HTTP)", () => {
   test("GET /templates/:name returns source; 404 when missing", async () => {
     const ok = await app.fetch(new Request("http://x/api/workflows/templates/seed"));
     expect(ok.status).toBe(200);
-    expect((await ok.json()).source).toBe("agent('hi');");
+    expect(((await ok.json()) as { source: string }).source).toBe("agent('hi');");
     const miss = await app.fetch(new Request("http://x/api/workflows/templates/nope"));
     expect(miss.status).toBe(404);
   });
@@ -104,7 +104,7 @@ describe("workflows route (HTTP)", () => {
       }),
     );
     expect(res.status).toBe(400);
-    expect((await res.json()).code).toBe("VALIDATION");
+    expect(((await res.json()) as { code: string }).code).toBe("VALIDATION");
   });
 
   test("POST /run rejects when both script and name given", async () => {
@@ -116,7 +116,7 @@ describe("workflows route (HTTP)", () => {
       }),
     );
     expect(res.status).toBe(400);
-    expect((await res.json()).code).toBe("VALIDATION");
+    expect(((await res.json()) as { code: string }).code).toBe("VALIDATION");
   });
 });
 
@@ -141,7 +141,7 @@ describe("workflows route via createApp", () => {
     });
     const res = await app.fetch(new Request("http://x/api/workflows/templates"));
     expect(res.status).toBe(200);
-    expect((await res.json()).ok).toBe(true);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
     conn.sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
