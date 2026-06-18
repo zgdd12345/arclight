@@ -12,6 +12,15 @@ from .db import connect
 from .settings import Settings
 
 
+async def _json_or_empty(request: Request) -> dict:
+    # Parity with TS `await c.req.json().catch(() => ({}))`: any parse failure → {}.
+    try:
+        data = await request.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _read_workspaces(db_path: str) -> list[dict]:
     # Read-only by discipline: SELECT only. Deterministic ORDER BY rowid (insertion
     # order) now that workspaces writes move to Python (slice-3 carry-forward).
@@ -71,5 +80,30 @@ def make_projects_get(settings: Settings):
                 "available": available,
             }
         )
+
+    return _handler
+
+
+def make_projects_patch(settings: Settings):
+    # Rename a workspace (display name only; repo_path/disk untouched). Parity with
+    # projects.ts PATCH /:workspaceId. Writes ONLY workspaces.name.
+    async def _handler(request: Request) -> JSONResponse:
+        ws_id = request.path_params["workspace_id"]
+        body = await _json_or_empty(request)
+        name = str(body.get("name", "") or "").strip()[:60]
+        if not name:
+            return JSONResponse({"ok": False, "code": "VALIDATION", "message": "name required"}, status_code=400)
+        if not os.path.exists(settings.db_path):
+            return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+        conn = connect(settings.db_path)
+        try:
+            row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (ws_id,)).fetchone()
+            if row is None:
+                return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+            conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", (name, ws_id))
+            conn.commit()
+        finally:
+            conn.close()
+        return JSONResponse({"ok": True})
 
     return _handler
