@@ -19,6 +19,21 @@ Key routing rules:
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
 
+## Task-completion review protocol (MANDATORY)
+
+At the END of every task (a feature/slice/fix is implemented and self-verified),
+you MUST invoke the `codex` skill to review the work, then fix according to its
+findings before declaring the task done. Do not skip this even when your own
+tests pass.
+
+- Trigger: any task that produced code/diff changes, right before reporting it
+  complete (and before any merge/PR/finishing step).
+- Action: invoke the `codex` skill (review mode) on the task's diff/changes.
+- Then: triage the review output — fix Critical/Important findings, record
+  Minor ones; re-review if a fix is non-trivial. Report what was found and fixed.
+- This runs IN ADDITION TO any subagent/plan review already performed; codex is
+  an independent second reviewer.
+
 ## Design System
 Always read DESIGN.md before making any visual or UI decisions.
 All font choices, colors, spacing, and aesthetic direction are defined there.
