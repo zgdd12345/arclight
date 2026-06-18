@@ -9,16 +9,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .db import connect
+from .httputil import json_or_empty
 from .settings import Settings
-
-
-async def _json_or_empty(request: Request) -> dict:
-    # Parity with TS `await c.req.json().catch(() => ({}))`: any parse failure → {}.
-    try:
-        data = await request.json()
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 def _read_workspaces(db_path: str) -> list[dict]:
@@ -89,7 +81,7 @@ def make_projects_patch(settings: Settings):
     # projects.ts PATCH /:workspaceId. Writes ONLY workspaces.name.
     async def _handler(request: Request) -> JSONResponse:
         ws_id = request.path_params["workspace_id"]
-        body = await _json_or_empty(request)
+        body = await json_or_empty(request)
         name = str(body.get("name", "") or "").strip()[:60]
         if not name:
             return JSONResponse({"ok": False, "code": "VALIDATION", "message": "name required"}, status_code=400)

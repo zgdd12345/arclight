@@ -35,6 +35,7 @@ async def _health(_request: Request) -> JSONResponse:
 def create_app(settings: Settings | None = None) -> Starlette:
     settings = settings or from_env()
     # Imported here so /health-only apps (slice 1 tests) don't require the projects deps path.
+    from .memories import make_memories_get, make_memories_post
     from .projects import make_projects_delete, make_projects_get, make_projects_patch
 
     routes = [
@@ -42,6 +43,8 @@ def create_app(settings: Settings | None = None) -> Starlette:
         Route("/api/projects", make_projects_get(settings), methods=["GET"]),
         Route("/api/projects/{workspace_id}", make_projects_patch(settings), methods=["PATCH"]),
         Route("/api/projects/{workspace_id}", make_projects_delete(settings), methods=["DELETE"]),
+        Route("/api/memories", make_memories_get(settings), methods=["GET"]),
+        Route("/api/memories", make_memories_post(settings), methods=["POST"]),
     ]
     middleware = [
         Middleware(BearerAuthMiddleware, token=settings.token, dev_no_auth=settings.dev_no_auth),
