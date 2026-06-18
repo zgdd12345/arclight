@@ -13,6 +13,8 @@ from .settings import Settings
 
 def _read_workspaces(db_path: str) -> list[dict]:
     # Read-only by discipline: SELECT only, never write/migrate. busy_timeout for WAL contention.
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"not found: {db_path}")
     conn = sqlite3.connect(db_path, timeout=5.0)
     try:
         conn.row_factory = sqlite3.Row
@@ -48,6 +50,11 @@ def make_projects_get(settings: Settings):
     async def _handler(_request: Request) -> JSONResponse:
         try:
             projects = _read_workspaces(settings.db_path)
+        except FileNotFoundError as exc:
+            return JSONResponse(
+                {"ok": False, "message": f"database error: {exc}"},
+                status_code=500,
+            )
         except sqlite3.OperationalError as exc:
             return JSONResponse(
                 {"ok": False, "message": f"database error: {exc}"},

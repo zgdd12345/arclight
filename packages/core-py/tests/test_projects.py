@@ -51,6 +51,21 @@ def test_projects_contract(tmp_path):
     assert all(not n.startswith(".") for n in names)
 
 
+def test_missing_db_returns_500_no_phantom_file(tmp_path):
+    # A nonexistent db_path must surface as HTTP 500 without creating a phantom file.
+    db_path = str(tmp_path / "nonexistent.sqlite")
+    root = tmp_path / "projects"
+    root.mkdir()
+    s = Settings(db_path=db_path, projects_root=str(root), token="t", dev_no_auth=True)
+    client = TestClient(create_app(s))
+    r = client.get("/api/projects")
+    assert r.status_code == 500
+    body = r.json()
+    assert body["ok"] is False
+    assert "not found" in body["message"]
+    assert not os.path.exists(db_path)
+
+
 def test_available_excludes_registered(tmp_path):
     # When a workspace repo_path resolves to a dir under root, that dir is excluded from available.
     db = tmp_path / "arclight.sqlite"

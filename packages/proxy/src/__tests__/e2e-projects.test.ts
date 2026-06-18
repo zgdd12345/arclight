@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeProxy } from "../server";
@@ -119,6 +119,7 @@ afterAll(() => {
   py?.kill();
   Bun.spawn(["pkill", "-f", `arclight_core.server.app:app --port ${PY_PORT}`]);
   tsUpstream?.stop(true);
+  if (workdir) rmSync(workdir, { recursive: true, force: true });
 });
 
 describe.skipIf(!E2E_AVAILABLE)("cross-runtime seam: GET /api/projects", () => {
