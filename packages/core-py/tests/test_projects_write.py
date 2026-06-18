@@ -110,14 +110,20 @@ def test_delete_blocked_by_active_turn_is_409(tmp_path):
     body = r.json()
     assert body["ok"] is False
     assert body["code"] == "TURN_ACTIVE"
+    assert body["message"] == "项目内有会话正在运行，先停止再删除"
     # workspace must NOT be deleted (fail-closed)
     conn = sqlite3.connect(str(db))
     assert conn.execute("SELECT COUNT(*) FROM workspaces WHERE id='w1'").fetchone()[0] == 1
     conn.close()
 
 
-def test_delete_allows_awaiting_approval_blocks(tmp_path):
+def test_delete_awaiting_approval_blocks(tmp_path):
     db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "awaiting_approval")])
+    assert _client(db, tmp_path).delete("/api/projects/w1").status_code == 409
+
+
+def test_delete_queued_turn_blocks(tmp_path):
+    db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "queued")])
     assert _client(db, tmp_path).delete("/api/projects/w1").status_code == 409
 
 
