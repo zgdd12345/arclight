@@ -56,7 +56,8 @@ def test_patch_truncates_to_60_chars(tmp_path):
     db = _seed(tmp_path)
     c = _client(db, tmp_path)
     long = "x" * 100
-    c.patch("/api/projects/w1", json={"name": long})
+    r = c.patch("/api/projects/w1", json={"name": long})
+    assert r.status_code == 200
     conn = sqlite3.connect(str(db))
     assert conn.execute("SELECT name FROM workspaces WHERE id='w1'").fetchone()[0] == "x" * 60
     conn.close()

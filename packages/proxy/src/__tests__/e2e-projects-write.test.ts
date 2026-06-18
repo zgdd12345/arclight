@@ -80,7 +80,7 @@ c.commit(); c.close()`,
     ],
     { stdout: "ignore", stderr: "pipe" },
   );
-  if (seed.exitCode !== 0) throw new Error(`seed failed: ${seed.stderr}`);
+  if (seed.exitCode !== 0) throw new Error(`seed failed: ${new TextDecoder().decode(seed.stderr)}`);
 
   py = Bun.spawn(
     [
