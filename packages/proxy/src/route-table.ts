@@ -19,7 +19,8 @@ export const DEFAULT_TABLE: RouteTable = {
   // sessions table → stays ts (also fixes the latent slice-2 mis-route).
   "/api/projects": { PATCH: "py", DELETE: "py", default: "ts" },
   "/api/config": "ts",
-  "/api/files": "ts",
+  // No /api/files entry: the upload endpoint is POST /api/sessions/:id/files
+  // (mounted under the sessions group), so it migrates with /api/sessions in M3.
   "/api/grants": "ts",
   "/api/commands": "ts",
   "/api/sessions": "ts",
