@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_TABLE, type RouteTable, resolveUpstream } from "../route-table";
 
-describe("resolveUpstream — plain entries", () => {
+describe("resolveUpstream — plain + prefix entries", () => {
   const table: RouteTable = { "/health": "py", "/api/sessions": "ts" };
   test("exact + subpath match", () => {
     expect(resolveUpstream("/health", table, "GET")).toBe("py");
@@ -18,25 +18,34 @@ describe("resolveUpstream — plain entries", () => {
   });
 });
 
-describe("resolveUpstream — method-aware entries", () => {
+describe("resolveUpstream — exact-match channel", () => {
   const table: RouteTable = {
-    "/api/projects": { GET: "py", default: "ts" },
+    "=/api/projects": { GET: "py", default: "ts" },
+    "/api/projects": { PATCH: "py", DELETE: "py", default: "ts" },
   };
-  test("GET routes to py, other methods to default ts", () => {
+  test("exact path uses the = entry (wins over the prefix entry)", () => {
     expect(resolveUpstream("/api/projects", table, "GET")).toBe("py");
     expect(resolveUpstream("/api/projects", table, "POST")).toBe("ts");
-    expect(resolveUpstream("/api/projects/ws1/sessions", table, "GET")).toBe("py");
-    expect(resolveUpstream("/api/projects/ws1", table, "DELETE")).toBe("ts");
   });
-  test("missing method falls back to default", () => {
-    expect(resolveUpstream("/api/projects", table, "PUT")).toBe("ts");
+  test("subpaths use the prefix entry, NOT the exact entry", () => {
+    expect(resolveUpstream("/api/projects/ws1", table, "PATCH")).toBe("py");
+    expect(resolveUpstream("/api/projects/ws1", table, "DELETE")).toBe("py");
+    // the M3 sessions read must stay ts (regression: slice 2 sent this to py)
+    expect(resolveUpstream("/api/projects/ws1/sessions", table, "GET")).toBe("ts");
+    // a subpath POST/unknown method falls to the prefix default
+    expect(resolveUpstream("/api/projects/ws1", table, "POST")).toBe("ts");
   });
 });
 
 describe("DEFAULT_TABLE", () => {
-  test("GET /api/projects → py, writes → ts", () => {
+  test("GET /api/projects → py (slice 2 preserved); POST → ts (stays TS this slice)", () => {
     expect(resolveUpstream("/api/projects", DEFAULT_TABLE, "GET")).toBe("py");
     expect(resolveUpstream("/api/projects", DEFAULT_TABLE, "POST")).toBe("ts");
+  });
+  test("PATCH/DELETE /api/projects/:id → py; GET :id/sessions → ts", () => {
+    expect(resolveUpstream("/api/projects/ws1", DEFAULT_TABLE, "PATCH")).toBe("py");
+    expect(resolveUpstream("/api/projects/ws1", DEFAULT_TABLE, "DELETE")).toBe("py");
+    expect(resolveUpstream("/api/projects/ws1/sessions", DEFAULT_TABLE, "GET")).toBe("ts");
   });
   test("health → py; other /api/* → ts", () => {
     expect(resolveUpstream("/health", DEFAULT_TABLE, "GET")).toBe("py");
