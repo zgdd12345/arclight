@@ -107,3 +107,41 @@ def make_projects_patch(settings: Settings):
         return JSONResponse({"ok": True})
 
     return _handler
+
+
+# Turn statuses that block workspace deletion (parity with projects.ts DELETE guard).
+_ACTIVE_TURN_STATUSES = ("queued", "running", "awaiting_approval")
+
+
+def make_projects_delete(settings: Settings):
+    # Unregister a workspace + FK-cascade its sessions/turns. Disk files untouched.
+    # Fail-closed if any session has an active turn. Parity with projects.ts DELETE.
+    # Writes ONLY workspaces (cascade is an engine side-effect of the FK).
+    async def _handler(request: Request) -> JSONResponse:
+        ws_id = request.path_params["workspace_id"]
+        if not os.path.exists(settings.db_path):
+            return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+        conn = connect(settings.db_path)
+        try:
+            row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (ws_id,)).fetchone()
+            if row is None:
+                return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+            placeholders = ",".join("?" for _ in _ACTIVE_TURN_STATUSES)
+            active = conn.execute(
+                "SELECT turns.id FROM turns "
+                "JOIN sessions ON turns.session_id = sessions.id "
+                f"WHERE sessions.workspace_id = ? AND turns.status IN ({placeholders}) LIMIT 1",
+                (ws_id, *_ACTIVE_TURN_STATUSES),
+            ).fetchone()
+            if active is not None:
+                return JSONResponse(
+                    {"ok": False, "code": "TURN_ACTIVE", "message": "项目内有会话正在运行，先停止再删除"},
+                    status_code=409,
+                )
+            conn.execute("DELETE FROM workspaces WHERE id = ?", (ws_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        return JSONResponse({"ok": True})
+
+    return _handler

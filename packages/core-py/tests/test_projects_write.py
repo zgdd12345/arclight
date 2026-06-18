@@ -81,3 +81,54 @@ def test_patch_missing_db_is_404(tmp_path):
     r = TestClient(create_app(s)).patch("/api/projects/w1", json={"name": "beta"})
     assert r.status_code == 404
     assert not (tmp_path / "absent.sqlite").exists()  # no phantom file created
+
+
+def test_delete_removes_workspace_and_cascades(tmp_path):
+    # workspace w1 with a session + a completed turn → delete succeeds and cascades.
+    db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "completed")])
+    r = _client(db, tmp_path).delete("/api/projects/w1")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    conn = sqlite3.connect(str(db))
+    assert conn.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0  # cascaded
+    assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0     # cascaded (via sessions)
+    conn.close()
+
+
+def test_delete_unknown_id_is_404(tmp_path):
+    db = _seed(tmp_path)
+    r = _client(db, tmp_path).delete("/api/projects/nope")
+    assert r.status_code == 404
+    assert r.json() == {"ok": False, "code": "NOT_FOUND"}
+
+
+def test_delete_blocked_by_active_turn_is_409(tmp_path):
+    db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "running")])
+    r = _client(db, tmp_path).delete("/api/projects/w1")
+    assert r.status_code == 409
+    body = r.json()
+    assert body["ok"] is False
+    assert body["code"] == "TURN_ACTIVE"
+    # workspace must NOT be deleted (fail-closed)
+    conn = sqlite3.connect(str(db))
+    assert conn.execute("SELECT COUNT(*) FROM workspaces WHERE id='w1'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_delete_allows_awaiting_approval_blocks(tmp_path):
+    db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "awaiting_approval")])
+    assert _client(db, tmp_path).delete("/api/projects/w1").status_code == 409
+
+
+def test_delete_ignores_terminal_turns(tmp_path):
+    # failed/interrupted/completed are NOT active → delete proceeds.
+    db = _seed(tmp_path, sessions=[("s1", "w1")], turns=[("t1", "s1", "failed")])
+    assert _client(db, tmp_path).delete("/api/projects/w1").status_code == 200
+
+
+def test_delete_missing_db_is_404(tmp_path):
+    s = Settings(db_path=str(tmp_path / "absent.sqlite"), projects_root=str(tmp_path), token="t", dev_no_auth=True)
+    r = TestClient(create_app(s)).delete("/api/projects/w1")
+    assert r.status_code == 404
+    assert not (tmp_path / "absent.sqlite").exists()  # no phantom file
