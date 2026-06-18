@@ -1,15 +1,13 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { createWorkflowRunner } from "../launch";
 
 describe("createWorkflowRunner", () => {
   test("maps the calling LoopToolContext onto the WorkflowContext", async () => {
     let captured: { source: string; args: unknown; ctx: Record<string, unknown> } | undefined;
-    mock.module("../runtime", () => ({
-      runWorkflow: async (source: string, args: unknown, ctx: Record<string, unknown>) => {
-        captured = { source, args, ctx };
-        return { status: "completed", output: { ok: 1 } };
-      },
-    }));
-    const { createWorkflowRunner } = await import("../launch");
+    const fakeRun = (async (source: string, args: unknown, ctx: Record<string, unknown>) => {
+      captured = { source, args, ctx };
+      return { status: "completed", output: { ok: 1 } };
+    }) as never;
 
     const callProvider = (async () => ({})) as never;
     const registry = { kind: "registry" } as never;
@@ -17,16 +15,19 @@ describe("createWorkflowRunner", () => {
     const executeTool = (async () => ({ ok: true })) as never;
     const store = { kind: "store" } as never;
     const journal = { kind: "journal" } as never;
-    const runner = createWorkflowRunner({
-      db: { kind: "db" } as never,
-      bus: { kind: "bus" } as never,
-      callProvider,
-      registry,
-      approvals,
-      executeTool,
-      store,
-      journal,
-    });
+    const runner = createWorkflowRunner(
+      {
+        db: { kind: "db" } as never,
+        bus: { kind: "bus" } as never,
+        callProvider,
+        registry,
+        approvals,
+        executeTool,
+        store,
+        journal,
+      },
+      fakeRun,
+    );
 
     const signal = new AbortController().signal;
     const toolCtx = {

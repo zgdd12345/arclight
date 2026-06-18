@@ -17,18 +17,24 @@ export type WorkflowRunner = (
   toolCtx: LoopToolContext,
 ) => Promise<WorkflowResult>;
 
-export function createWorkflowRunner(deps: {
-  db: Db;
-  bus: EventBus;
-  callProvider: WorkflowContext["callProvider"];
-  registry: WorkflowContext["registry"];
-  approvals: WorkflowContext["approvals"];
-  executeTool: WorkflowContext["executeTool"];
-  store: WorkflowStore;
-  journal: WorkflowJournalService;
-}): WorkflowRunner {
+export function createWorkflowRunner(
+  deps: {
+    db: Db;
+    bus: EventBus;
+    callProvider: WorkflowContext["callProvider"];
+    registry: WorkflowContext["registry"];
+    approvals: WorkflowContext["approvals"];
+    executeTool: WorkflowContext["executeTool"];
+    store: WorkflowStore;
+    journal: WorkflowJournalService;
+  },
+  // Injectable seam (defaults to the real runWorkflow). The unit test injects a
+  // capturing fake — do NOT swap this for mock.module, which leaks process-wide
+  // and breaks runtime.test.ts by stripping runtime.ts's other exports.
+  runWorkflowFn: typeof runWorkflow = runWorkflow,
+): WorkflowRunner {
   return (source, args, toolCtx) =>
-    runWorkflow(source, args, {
+    runWorkflowFn(source, args, {
       parentSessionId: toolCtx.sessionId,
       parentTurnId: toolCtx.turnId,
       cwd: toolCtx.cwd,
