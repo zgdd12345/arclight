@@ -36,6 +36,11 @@ function pick(v: Upstream | MethodUpstream, method: string): Upstream {
 }
 
 export function resolveUpstream(path: string, table: RouteTable, method = "GET"): Upstream {
+  // Normalize a single trailing slash (except root "/") so "/api/projects/"
+  // resolves identically to "/api/projects" — otherwise a trailing slash skips
+  // the exact-match channel and falls to the prefix default, silently re-routing
+  // a migrated exact path back to TS.
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   // Exact-match entries (keyed "=<path>") win over prefix entries.
   const exact = table[`=${path}`];
   if (exact !== undefined) return pick(exact, method);

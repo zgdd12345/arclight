@@ -27,6 +27,10 @@ describe("resolveUpstream — exact-match channel", () => {
     expect(resolveUpstream("/api/projects", table, "GET")).toBe("py");
     expect(resolveUpstream("/api/projects", table, "POST")).toBe("ts");
   });
+  test("trailing slash on the exact path still resolves to the exact entry", () => {
+    expect(resolveUpstream("/api/projects/", table, "GET")).toBe("py");
+    expect(resolveUpstream("/api/projects/", table, "POST")).toBe("ts");
+  });
   test("subpaths use the prefix entry, NOT the exact entry", () => {
     expect(resolveUpstream("/api/projects/ws1", table, "PATCH")).toBe("py");
     expect(resolveUpstream("/api/projects/ws1", table, "DELETE")).toBe("py");

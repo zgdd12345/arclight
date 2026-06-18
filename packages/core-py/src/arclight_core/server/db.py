@@ -12,6 +12,12 @@ import sqlite3
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    # Manual transaction control (autocommit): single statements auto-commit;
+    # the DELETE critical section uses an explicit BEGIN IMMEDIATE so its
+    # active-turn guard and the delete are atomic against a concurrent writer.
+    # (Python's default deferred isolation wouldn't take a lock until the first
+    # write, leaving a TOCTOU window between the guard SELECT and the DELETE.)
+    conn.isolation_level = None
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn

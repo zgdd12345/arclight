@@ -123,8 +123,10 @@ def make_projects_delete(settings: Settings):
             return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
         conn = connect(settings.db_path)
         try:
+            conn.execute("BEGIN IMMEDIATE")  # take the write lock before the guard
             row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (ws_id,)).fetchone()
             if row is None:
+                conn.execute("ROLLBACK")
                 return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
             placeholders = ",".join("?" for _ in _ACTIVE_TURN_STATUSES)
             active = conn.execute(
@@ -134,12 +136,13 @@ def make_projects_delete(settings: Settings):
                 (ws_id, *_ACTIVE_TURN_STATUSES),
             ).fetchone()
             if active is not None:
+                conn.execute("ROLLBACK")
                 return JSONResponse(
                     {"ok": False, "code": "TURN_ACTIVE", "message": "项目内有会话正在运行，先停止再删除"},
                     status_code=409,
                 )
             conn.execute("DELETE FROM workspaces WHERE id = ?", (ws_id,))
-            conn.commit()
+            conn.execute("COMMIT")
         finally:
             conn.close()
         return JSONResponse({"ok": True})
