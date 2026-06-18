@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { Db } from "../../db/client";
 import { checkpoints, sessions, turns, usage, workspaces } from "../../db/schema";
 import { DEFAULT_EFFECTIVE_WINDOW } from "../../loop/compaction";
+import { ensureWorkspace } from "../workspace";
 
 /** 会话是否有活跃 turn（queued/running/awaiting_approval）——删除前守卫，fail-closed。 */
 export function hasActiveTurn(db: Db, sessionId: string): boolean {
@@ -30,20 +31,6 @@ export function createSessionsRoute(deps: {
   const { db, repoPath, arclightDir } = deps;
   const effectiveWindow = deps.effectiveWindow ?? DEFAULT_EFFECTIVE_WINDOW;
 
-  function ensureWorkspace(): string {
-    const existing = db
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(eq(workspaces.repoPath, repoPath))
-      .get();
-    if (existing) return existing.id;
-    const id = randomUUID();
-    db.insert(workspaces)
-      .values({ id, name: repoPath.split("/").at(-1) ?? "repo", repoPath, arclightDir })
-      .run();
-    return id;
-  }
-
   return (
     new Hono()
       .post("/", async (c) => {
@@ -65,7 +52,7 @@ export function createSessionsRoute(deps: {
             return c.json({ ok: false, code: "VALIDATION", message: "workspace not found" }, 400);
           workspaceId = ws.id;
         } else {
-          workspaceId = ensureWorkspace();
+          workspaceId = ensureWorkspace(db, repoPath, arclightDir);
         }
         const dup = db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, id)).get();
         if (dup) return c.json({ ok: false, code: "VALIDATION", message: "session exists" }, 409);
