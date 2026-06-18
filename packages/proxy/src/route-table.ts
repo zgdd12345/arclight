@@ -23,7 +23,7 @@ export const DEFAULT_TABLE: RouteTable = {
   "/api/grants": "ts",
   "/api/commands": "ts",
   "/api/sessions": "ts",
-  "/api/memories": "ts",
+  "/api/memories": "py",
 };
 
 function isMethodUpstream(v: Upstream | MethodUpstream): v is MethodUpstream {

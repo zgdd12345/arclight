@@ -56,4 +56,10 @@ describe("DEFAULT_TABLE", () => {
     expect(resolveUpstream("/api/sessions", DEFAULT_TABLE, "GET")).toBe("ts");
     expect(resolveUpstream("/api/config", DEFAULT_TABLE, "GET")).toBe("ts");
   });
+  test("whole /api/memories group → py (all methods + subpaths)", () => {
+    expect(resolveUpstream("/api/memories", DEFAULT_TABLE, "GET")).toBe("py");
+    expect(resolveUpstream("/api/memories", DEFAULT_TABLE, "POST")).toBe("py");
+    expect(resolveUpstream("/api/memories/m1", DEFAULT_TABLE, "PATCH")).toBe("py");
+    expect(resolveUpstream("/api/memories/m1", DEFAULT_TABLE, "DELETE")).toBe("py");
+  });
 });
