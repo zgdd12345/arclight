@@ -32,6 +32,7 @@ export {
 } from "./scheduler";
 export { jsonSchemaToZod, makeStructuredOutputTool } from "./schema"; // M1
 export { resolveWorkflowSource, WORKFLOW_NAME_RE, WorkflowStore } from "./store"; // M5
+export { TemplateStore, type WorkflowTemplate } from "./template-store"; // M2
 export { defaultSafeToolNames, RestrictedToolRegistry, runSubagent } from "./subagent"; // M1
 
 // ── 类型再导出（权威来源 ./types）──
