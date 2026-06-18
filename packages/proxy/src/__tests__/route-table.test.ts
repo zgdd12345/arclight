@@ -1,33 +1,46 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_TABLE, type RouteTable, resolveUpstream } from "../route-table";
 
-const table: RouteTable = {
-  "/health": "py",
-  "/api/sessions": "ts",
-};
-
-describe("resolveUpstream", () => {
-  test("longest-prefix match wins", () => {
-    expect(resolveUpstream("/health", table)).toBe("py");
-    expect(resolveUpstream("/api/sessions/abc/events", table)).toBe("ts");
+describe("resolveUpstream — plain entries", () => {
+  const table: RouteTable = { "/health": "py", "/api/sessions": "ts" };
+  test("exact + subpath match", () => {
+    expect(resolveUpstream("/health", table, "GET")).toBe("py");
+    expect(resolveUpstream("/api/sessions/abc/events", table, "GET")).toBe("ts");
   });
   test("unknown path defaults to ts", () => {
-    expect(resolveUpstream("/api/unknown", table)).toBe("ts");
+    expect(resolveUpstream("/api/unknown", table, "GET")).toBe("ts");
   });
-  test("a sibling path does not false-match a shorter prefix", () => {
-    // "/healthcheck" must NOT match the "/health" group
-    expect(resolveUpstream("/healthcheck", { "/health": "py" })).toBe("ts");
+  test("sibling does not false-match", () => {
+    expect(resolveUpstream("/healthcheck", { "/health": "py" }, "GET")).toBe("ts");
+  });
+  test("plain entry ignores method", () => {
+    expect(resolveUpstream("/health", { "/health": "py" }, "POST")).toBe("py");
+  });
+});
+
+describe("resolveUpstream — method-aware entries", () => {
+  const table: RouteTable = {
+    "/api/projects": { GET: "py", default: "ts" },
+  };
+  test("GET routes to py, other methods to default ts", () => {
+    expect(resolveUpstream("/api/projects", table, "GET")).toBe("py");
+    expect(resolveUpstream("/api/projects", table, "POST")).toBe("ts");
+    expect(resolveUpstream("/api/projects/ws1/sessions", table, "GET")).toBe("py");
+    expect(resolveUpstream("/api/projects/ws1", table, "DELETE")).toBe("ts");
+  });
+  test("missing method falls back to default", () => {
+    expect(resolveUpstream("/api/projects", table, "PUT")).toBe("ts");
   });
 });
 
 describe("DEFAULT_TABLE", () => {
-  test("health group is /health and routes to py", () => {
-    expect(DEFAULT_TABLE["/health"]).toBe("py");
-    expect(DEFAULT_TABLE["/api/health"]).toBeUndefined();
+  test("GET /api/projects → py, writes → ts", () => {
+    expect(resolveUpstream("/api/projects", DEFAULT_TABLE, "GET")).toBe("py");
+    expect(resolveUpstream("/api/projects", DEFAULT_TABLE, "POST")).toBe("ts");
   });
-  test("all /api/* groups still route to ts", () => {
-    for (const [prefix, up] of Object.entries(DEFAULT_TABLE)) {
-      if (prefix.startsWith("/api/")) expect(up).toBe("ts");
-    }
+  test("health → py; other /api/* → ts", () => {
+    expect(resolveUpstream("/health", DEFAULT_TABLE, "GET")).toBe("py");
+    expect(resolveUpstream("/api/sessions", DEFAULT_TABLE, "GET")).toBe("ts");
+    expect(resolveUpstream("/api/config", DEFAULT_TABLE, "GET")).toBe("ts");
   });
 });

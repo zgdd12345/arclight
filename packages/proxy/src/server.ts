@@ -11,7 +11,7 @@ export type ProxyOpts = {
 export function makeProxy(opts: ProxyOpts): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
-    const target = resolveUpstream(url.pathname, opts.table);
+    const target = resolveUpstream(url.pathname, opts.table, req.method);
     const base = target === "py" ? opts.pyUpstream : opts.tsUpstream;
     if (!base) {
       return new Response(`no upstream configured for "${target}"`, { status: 502 });
