@@ -18,6 +18,9 @@ import { createMemoriesRoute } from "./routes/memories";
 import { createProjectsRoute } from "./routes/projects";
 import { createSessionsRoute } from "./routes/sessions";
 import { createSnapshotRoute } from "./routes/snapshot";
+import { createWorkflowsRoute } from "./routes/workflows";
+import type { WorkflowRunner } from "../workflow";
+import type { TemplateStore, WorkflowStore } from "../workflow";
 
 export type AppDeps = {
   repoPath: string;
@@ -33,6 +36,9 @@ export type AppDeps = {
   projectsRoot?: string; // 项目围栏根（缺省 = repoPath 的父目录）
   providerManager?: ProviderManager; // 模型/thinking 运行时切换（serve 注入；缺省 /api/config 503）
   effectiveWindow?: number; // 上下文压缩窗口（须与 runner 一致；/context-usage 端点据此报余量）
+  workflowRunner?: WorkflowRunner; // 动态工作流 HTTP 入口（serve 注入；缺省不挂 /api/workflows）
+  workflowStore?: WorkflowStore;
+  templateStore?: TemplateStore;
 };
 
 /** 私网/回环主机名分类：localhost、127/8 与 ::1 回环、RFC1918（10/8、172.16-31、192.168/16）、
@@ -136,6 +142,19 @@ export function createApp(deps: AppDeps) {
     createGrantsRoute(deps.approvals !== undefined ? { approvals: deps.approvals } : {}),
   ); // 审批白名单管理
   api.route("/memories", createMemoriesRoute({ db: deps.db })); // 记忆管理
+  if (deps.workflowRunner && deps.workflowStore && deps.templateStore) {
+    api.route(
+      "/workflows",
+      createWorkflowsRoute({
+        db: deps.db,
+        repoPath: deps.repoPath,
+        arclightDir: deps.arclightDir,
+        run: deps.workflowRunner,
+        store: deps.workflowStore,
+        templates: deps.templateStore,
+      }),
+    );
+  }
   api.route(
     "/config",
     createConfigRoute(

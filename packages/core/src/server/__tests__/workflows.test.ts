@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { createDb } from "../../db/client";
 import { runMigrations } from "../../db/migrate";
 import { sessions, turns } from "../../db/schema";
+import { EventBus } from "../../events/bus";
 import { TemplateStore, WorkflowStore } from "../../workflow";
 import type { WorkflowRunner } from "../../workflow";
 import { createWorkflowsRoute } from "../routes/workflows";
@@ -116,5 +117,32 @@ describe("workflows route (HTTP)", () => {
     );
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe("VALIDATION");
+  });
+});
+
+describe("workflows route via createApp", () => {
+  test("mounted under /api with bearer auth bypassed by devNoAuth", async () => {
+    const { createApp } = await import("../app");
+    const dir = mkdtempSync(join(tmpdir(), "arclight-wfapp-"));
+    const arclightDir = join(dir, ".arclight");
+    const { dbPath } = runMigrations(arclightDir);
+    const conn = createDb(dbPath);
+    const run: WorkflowRunner = async () => ({ status: "completed", output: 1 });
+    const app = createApp({
+      repoPath: dir,
+      arclightDir,
+      db: conn.db,
+      bus: new EventBus(),
+      token: "t",
+      devNoAuth: true,
+      workflowRunner: run,
+      workflowStore: new WorkflowStore(arclightDir),
+      templateStore: new TemplateStore(arclightDir),
+    });
+    const res = await app.fetch(new Request("http://x/api/workflows/templates"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    conn.sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -23,7 +23,7 @@ import { runWorkflowTool } from "./tools/builtin/runWorkflow";
 import { writeFileTool } from "./tools/builtin/writeFile";
 import { makeExecuteTool, ToolRegistry } from "./tools/registry";
 import { UsageTracker } from "./usage/tracker";
-import { createWorkflowRunner, WorkflowJournalService, WorkflowStore } from "./workflow";
+import { createWorkflowRunner, WorkflowJournalService, WorkflowStore, TemplateStore } from "./workflow";
 
 // arclight serve --repo <path>：迁移锁 → migrate → db/bus → Hono(C1/C2) → server.json 0600
 
@@ -78,6 +78,7 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
   );
   // ── M6 workflow 生产接线 ──
   const workflowStore = new WorkflowStore(arclightDir);
+  const templateStore = new TemplateStore(arclightDir);
   const workflowJournal = new WorkflowJournalService(db);
   // 子 agent 的工具执行壳：不注入 workflows（杜绝子 agent 经工具层自起 workflow，spec §1/§10）。
   const subagentExecuteTool = makeExecuteTool({
@@ -135,6 +136,9 @@ export async function serve(argv: string[] = process.argv.slice(2)): Promise<voi
     providerManager,
     // projectsRoot 在 loadConfig 内恒被计算，但类型为 optional；exactOptionalPropertyTypes 下条件展开。
     ...(projectsRoot !== undefined ? { projectsRoot } : {}),
+    workflowRunner: launchWorkflow,
+    workflowStore,
+    templateStore,
   });
   const server = Bun.serve({
     hostname: config.host,
