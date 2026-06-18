@@ -53,9 +53,10 @@ def test_patch_enabled_only(tmp_path):
     db = _seed(tmp_path)
     r = _client(db, tmp_path).patch("/api/memories/m1", json={"enabled": False})
     assert r.status_code == 200
-    content, enabled, _ = _row(db)
+    content, enabled, updated_at = _row(db)
     assert content == "original"  # untouched
     assert enabled == 0
+    assert updated_at > 100  # bumped
 
 
 def test_patch_truncates_content_to_500(tmp_path):
@@ -89,5 +90,29 @@ def test_patch_unknown_id_is_404(tmp_path):
 def test_patch_missing_db_is_404(tmp_path):
     s = Settings(db_path=str(tmp_path / "absent.sqlite"), projects_root=str(tmp_path), token="t", dev_no_auth=True)
     r = TestClient(create_app(s)).patch("/api/memories/m1", json={"content": "x"})
+    assert r.status_code == 404
+    assert not (tmp_path / "absent.sqlite").exists()  # no phantom file
+
+
+def test_delete_removes_row(tmp_path):
+    db = _seed(tmp_path)
+    r = _client(db, tmp_path).delete("/api/memories/m1")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    conn = sqlite3.connect(str(db))
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE id='m1'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_delete_unknown_id_is_404(tmp_path):
+    db = _seed(tmp_path)
+    r = _client(db, tmp_path).delete("/api/memories/nope")
+    assert r.status_code == 404
+    assert r.json() == {"ok": False, "code": "NOT_FOUND"}
+
+
+def test_delete_missing_db_is_404(tmp_path):
+    s = Settings(db_path=str(tmp_path / "absent.sqlite"), projects_root=str(tmp_path), token="t", dev_no_auth=True)
+    r = TestClient(create_app(s)).delete("/api/memories/m1")
     assert r.status_code == 404
     assert not (tmp_path / "absent.sqlite").exists()  # no phantom file

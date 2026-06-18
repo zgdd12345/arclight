@@ -107,3 +107,23 @@ def make_memories_patch(settings: Settings):
         return JSONResponse({"ok": True})
 
     return _handler
+
+
+def make_memories_delete(settings: Settings):
+    # Delete a memory. Parity with memories.ts DELETE /:id. No FK children, no
+    # guard — a single auto-committed DELETE (the SELECT only shapes the 404).
+    async def _handler(request: Request) -> JSONResponse:
+        mem_id = request.path_params["memory_id"]
+        if not os.path.exists(settings.db_path):
+            return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+        conn = connect(settings.db_path)
+        try:
+            row = conn.execute("SELECT id FROM memories WHERE id = ?", (mem_id,)).fetchone()
+            if row is None:
+                return JSONResponse({"ok": False, "code": "NOT_FOUND"}, status_code=404)
+            conn.execute("DELETE FROM memories WHERE id = ?", (mem_id,))
+        finally:
+            conn.close()
+        return JSONResponse({"ok": True})
+
+    return _handler
