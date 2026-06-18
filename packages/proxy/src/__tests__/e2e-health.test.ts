@@ -4,7 +4,15 @@ import { makeProxy } from "../server";
 // Boot the REAL Python health app under uvicorn on an ephemeral-but-fixed port,
 // plus a fake TS upstream, and route through the real proxy handler.
 // NOTE: This suite requires the `arclight` conda env with arclight_core installed.
-const PY_PORT = 8791;
+
+// Grab a free port by opening an ephemeral listener and immediately closing it.
+function freePort(): number {
+  const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const p = s.port;
+  s.stop();
+  return p;
+}
+const PY_PORT = freePort();
 const repoRoot = new URL("../../../../", import.meta.url).pathname; // packages/proxy/src/__tests__ -> repo root
 
 function arclightEnvAvailable(): boolean {
